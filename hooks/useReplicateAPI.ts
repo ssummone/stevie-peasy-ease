@@ -45,7 +45,7 @@ export function useReplicateAPI({ token }: UseReplicateAPIOptions) {
         }
 
         const prediction: ReplicatePrediction = await createResponse.json();
-        let predictionId = prediction.id;
+        const predictionId = prediction.id;
 
         // Poll for completion
         let attempts = 0;

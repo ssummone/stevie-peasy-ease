@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { TransitionVideo } from '@/lib/types';
-import { Loader2, AlertCircle, Download } from 'lucide-react';
+import { Loader2, AlertCircle, Download, CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 interface VideosListProps {
@@ -11,79 +11,69 @@ interface VideosListProps {
 }
 
 export function VideosList({ videos, isGenerating }: VideosListProps) {
-  const [videoError, setVideoError] = useState<string | null>(null);
-  const [selectedVideoUrl, setSelectedVideoUrl] = useState<string | null>(null);
+  const completedCount = videos.filter((v) => v.url && !v.loading).length;
+  const [downloadingId, setDownloadingId] = useState<number | null>(null);
 
-  const completedVideo = videos.find((v) => v.url && !v.loading);
-
-  // Update selected video when a new one completes
-  if (completedVideo && completedVideo.url !== selectedVideoUrl) {
-    setSelectedVideoUrl(completedVideo.url);
-    setVideoError(null);
-  }
-
-  const downloadVideo = (video: TransitionVideo, fileName: string) => {
+  const downloadVideo = async (video: TransitionVideo, fileName: string) => {
     if (!video.url) return;
+    try {
+      setDownloadingId(video.id);
+      const response = await fetch(video.url);
+      if (!response.ok) {
+        throw new Error('Unable to fetch video');
+      }
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
 
-    // Create a temporary anchor element
-    const link = document.createElement('a');
-    link.href = video.url;
-    link.download = fileName;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      URL.revokeObjectURL(objectUrl);
+    } catch (error) {
+      console.error('Video download failed', error);
+    } finally {
+      setDownloadingId((prev) => (prev === video.id ? null : prev));
+    }
   };
 
-  const completedCount = videos.filter((v) => v.url && !v.loading).length;
-
   return (
-    <div className="w-full space-y-4">
-      <div className="flex flex-col items-center gap-2 text-center">
-        <h2 className="text-2xl font-bold text-foreground">
-          Transition Videos
-        </h2>
-        <p className="text-sm text-muted-foreground">
-          {completedCount} of {videos.length} videos generated
-        </p>
-      </div>
+    <div className="w-full space-y-3">
+      {videos.map((video) => {
+        const isReady = Boolean(video.url && !video.loading && !video.error);
+        const statusIcon = video.loading
+          ? <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+          : video.error
+            ? <AlertCircle className="h-3.5 w-3.5 text-destructive" />
+            : isReady
+              ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+              : null;
+        const statusLabel = video.loading
+          ? 'Generating...'
+          : video.error
+            ? `Failed: ${video.error}`
+            : isReady
+              ? 'Ready'
+              : 'Pending';
 
-      <div className="space-y-3">
-        {videos.map((video) => (
+        return (
           <div
             key={video.id}
-            className="flex items-center gap-4 p-4 rounded-lg border border-border"
+            className="flex items-center justify-between gap-4 rounded-lg border border-border/70 bg-muted/40 px-4 py-3"
           >
-            {/* Video Preview */}
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-3 mb-2">
-                <span className="text-sm font-medium text-foreground">
-                  {video.name}
-                </span>
-                {video.loading && (
-                  <div className="flex items-center gap-1.5">
-                    <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                    <span className="text-xs text-muted-foreground">
-                      Generating...
-                    </span>
-                  </div>
-                )}
-                {video.error && (
-                  <div className="flex items-center gap-1.5">
-                    <AlertCircle className="h-4 w-4 text-destructive" />
-                    <span className="text-xs text-destructive">Failed</span>
-                  </div>
-                )}
-                {video.url && !video.loading && (
-                  <span className="text-xs text-green-600">✓ Ready</span>
-                )}
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium text-foreground truncate">
+                {video.name}
+              </p>
+              <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+                {statusIcon}
+                <span className="truncate">{statusLabel}</span>
               </div>
-
-              {video.error && (
-                <p className="text-xs text-destructive">{video.error}</p>
-              )}
             </div>
 
-            {/* Download Button */}
             {video.url && !video.loading && (
               <Button
                 size="sm"
@@ -94,68 +84,27 @@ export function VideosList({ videos, isGenerating }: VideosListProps) {
                     `transition-${video.id.toString().padStart(2, '0')}.mp4`
                   )
                 }
+                disabled={downloadingId === video.id}
                 className="gap-2 shrink-0"
               >
-                <Download className="h-4 w-4" />
-                <span className="hidden sm:inline">Download</span>
+                {downloadingId === video.id ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="h-4 w-4" />
+                )}
+                <span className="hidden sm:inline">
+                  {downloadingId === video.id ? 'Downloading...' : 'Download'}
+                </span>
               </Button>
             )}
           </div>
-        ))}
-      </div>
+        );
+      })}
 
-      {/* Video Player - Show first completed video */}
-      {completedVideo && (
-        <div className="mt-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="font-semibold text-foreground">Preview</h3>
-            <span className="text-xs text-muted-foreground">
-              {completedVideo.name}
-            </span>
-          </div>
-          <div className="relative w-full max-w-2xl aspect-video bg-black rounded-lg overflow-hidden border border-border mx-auto">
-            {selectedVideoUrl ? (
-              <>
-                <video
-                  key={selectedVideoUrl}
-                  controls
-                  className="h-full w-full"
-                  src={selectedVideoUrl}
-                  onError={(e) => {
-                    console.error('Video error:', e);
-                    const errorMsg = 'Failed to load video. The URL may have expired or is not accessible.';
-                    setVideoError(errorMsg);
-                  }}
-                  onLoadStart={() => {
-                    console.log('Loading video:', selectedVideoUrl);
-                    setVideoError(null);
-                  }}
-                  onCanPlay={() => {
-                    console.log('Video ready to play:', selectedVideoUrl);
-                  }}
-                >
-                  Your browser does not support the video tag.
-                </video>
-                {videoError && (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-destructive/10 p-4">
-                    <AlertCircle className="h-6 w-6 text-destructive" />
-                    <p className="text-xs text-destructive text-center">
-                      {videoError}
-                    </p>
-                    <p className="text-xs text-destructive/70 text-center mt-2">
-                      URL: {selectedVideoUrl}
-                    </p>
-                  </div>
-                )}
-              </>
-            ) : (
-              <div className="absolute inset-0 flex items-center justify-center bg-black/50">
-                <p className="text-white text-sm">Loading preview...</p>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      <p className="text-xs text-muted-foreground text-center">
+        {completedCount} of {videos.length} ready
+        {isGenerating ? ' · generating…' : ''}
+      </p>
     </div>
   );
 }

@@ -12,14 +12,14 @@ export interface GeneratedImage {
 export interface ReplicatePrediction {
   id: string;
   status: 'starting' | 'processing' | 'succeeded' | 'failed' | 'canceled';
-  input: Record<string, any>;
-  output?: any;
+  input: Record<string, unknown>;
+  output?: unknown;
   error?: string;
   created_at: string;
   started_at?: string;
   completed_at?: string;
   expires_at: string;
-  metrics?: Record<string, any>;
+  metrics?: Record<string, unknown>;
 }
 
 export interface QwenInput {
@@ -49,6 +49,10 @@ export interface TransitionVideo {
   url: string;
   loading: boolean;
   error?: string;
+  duration?: number;
+  easingPreset?: string;
+  useCustomEasing?: boolean;
+  customBezier?: [number, number, number, number];
 }
 
 export interface KlingVideoInput {
@@ -57,4 +61,11 @@ export interface KlingVideoInput {
   image_2?: string;
   duration?: number;
   mode?: 'standard' | 'pro';
+}
+
+export interface FinalVideo {
+  blob: Blob;
+  url: string; // Object URL for preview/download
+  size: number; // File size in bytes
+  createdAt: Date;
 }

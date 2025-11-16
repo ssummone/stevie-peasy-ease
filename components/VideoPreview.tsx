@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { GeneratedVideo } from '@/lib/types';
 import { Loader2, AlertCircle } from 'lucide-react';
 
@@ -9,9 +10,26 @@ interface VideoPreviewProps {
 }
 
 export function VideoPreview({ video, onRegenerate }: VideoPreviewProps) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!video?.startTime) {
+      return;
+    }
+    const interval = window.setInterval(() => {
+      setNow(Date.now());
+    }, 1000);
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [video?.startTime]);
+
   if (!video) {
     return null;
   }
+
+  const elapsedSeconds =
+    video.startTime !== undefined ? Math.max(0, Math.round((now - video.startTime) / 1000)) : null;
 
   return (
     <div className="w-full space-y-4">
@@ -40,9 +58,9 @@ export function VideoPreview({ video, onRegenerate }: VideoPreviewProps) {
               <p className="text-white text-sm">
                 Generating video...
               </p>
-              {video.startTime && (
+              {elapsedSeconds !== null && (
                 <p className="text-white text-xs text-muted-foreground">
-                  {Math.round((Date.now() - video.startTime) / 1000)}s elapsed
+                  {elapsedSeconds}s elapsed
                 </p>
               )}
             </div>
@@ -65,9 +83,9 @@ export function VideoPreview({ video, onRegenerate }: VideoPreviewProps) {
         {video.url && !video.loading && (
           <div className="flex flex-col items-center gap-2 text-sm text-muted-foreground">
             <p>Video ready for download and processing</p>
-            {video.startTime && (
+            {elapsedSeconds !== null && (
               <p>
-                Generated in {Math.round((Date.now() - video.startTime) / 1000)}s
+                Generated in {elapsedSeconds}s
               </p>
             )}
           </div>

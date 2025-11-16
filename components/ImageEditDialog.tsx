@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
@@ -71,7 +72,7 @@ export function ImageEditDialog({
       }
 
       const prediction = await createResponse.json();
-      let predictionId = prediction.id;
+      const predictionId = prediction.id;
 
       // Poll for completion
       let attempts = 0;
@@ -137,7 +138,7 @@ export function ImageEditDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-3xl lg:max-w-4xl">
         <DialogHeader>
           <DialogTitle>Edit Image</DialogTitle>
           <DialogDescription>
@@ -145,14 +146,19 @@ export function ImageEditDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <div className="space-y-6">
           {/* Image Preview */}
           <div className="flex justify-center">
-            <img
-              src={imageUrl}
-              alt="Edit preview"
-              className="max-h-40 rounded-lg border border-border"
-            />
+            <div className="relative w-full max-w-3xl">
+              <Image
+                src={imageUrl}
+                alt="Edit preview"
+                width={1920}
+                height={1080}
+                className="h-full w-full rounded-xl border border-border shadow-lg object-contain"
+                unoptimized
+              />
+            </div>
           </div>
 
           {/* Edit Prompt Input */}

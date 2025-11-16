@@ -1,0 +1,237 @@
+'use client';
+
+import { useState } from 'react';
+import { FinalVideo, TransitionVideo } from '@/lib/types';
+import { Label } from '@/components/ui/label';
+import { CubicBezierEditor } from '@/components/CubicBezierEditor';
+import { Button } from '@/components/ui/button';
+import { Loader2, Play } from 'lucide-react';
+import { getPresetBezier } from '@/lib/easing-presets';
+import { useVideoPlayback } from '@/hooks/useVideoPlayback';
+import { VideoPlaybackControls } from '@/components/VideoPlaybackControls';
+import { VideoTimeline } from '@/components/VideoTimeline';
+import { getCurrentSegment } from '@/lib/timeline-utils';
+
+interface FinalVideoEditorProps {
+  finalVideo: FinalVideo;
+  segments: TransitionVideo[];
+  selectedSegmentId: number | null;
+  easingOptions: string[];
+  onSelectSegment: (id: number) => void;
+  onDurationChange: (id: number, duration: number, applyAll?: boolean) => void;
+  onPresetChange: (id: number, preset: string, applyAll?: boolean) => void;
+  onBezierChange: (id: number, bezier: [number, number, number, number], applyAll?: boolean) => void;
+  defaultBezier: [number, number, number, number];
+  onCloneSegmentSettings: (id: number) => void;
+  onUpdateVideo: () => void;
+  isUpdating: boolean;
+  onExit: () => void;
+  onDownload: () => void;
+}
+
+export function FinalVideoEditor({
+  finalVideo,
+  segments,
+  selectedSegmentId,
+  easingOptions,
+  onSelectSegment,
+  onDurationChange,
+  onPresetChange,
+  onBezierChange,
+  defaultBezier,
+  onCloneSegmentSettings,
+  onUpdateVideo,
+  isUpdating,
+  onExit,
+  onDownload,
+}: FinalVideoEditorProps) {
+  const selectedSegment = segments.find((segment) => segment.id === selectedSegmentId) ?? null;
+  const [applyAll, setApplyAll] = useState(false);
+
+  // Video playback control
+  const { videoRef, state, togglePlayPause, seek } = useVideoPlayback((currentTime) => {
+    // Auto-select segment based on playback position
+    const currentSegment = getCurrentSegment(currentTime, segments);
+    if (currentSegment && currentSegment.id !== selectedSegmentId) {
+      onSelectSegment(currentSegment.id);
+    }
+  });
+
+  return (
+    <div className="w-full space-y-6">
+      <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
+        <div className="space-y-6">
+          <div className="relative aspect-video w-full overflow-hidden rounded-xl border border-border bg-black">
+            <video
+              ref={videoRef}
+              src={finalVideo.url}
+              loop
+              className="h-full w-full"
+              preload="metadata"
+            />
+          </div>
+
+          {/* Playback Controls */}
+          <div>
+            <VideoPlaybackControls
+              isPlaying={state.isPlaying}
+              currentTime={state.currentTime}
+              duration={state.duration}
+              onPlayPause={togglePlayPause}
+              videoSize={finalVideo.size}
+              createdAt={finalVideo.createdAt}
+            />
+          </div>
+
+          {/* Timeline */}
+          <div className="space-y-2">
+            <div>
+              <h4 className="text-base font-semibold text-foreground">Timeline</h4>
+              <p className="text-xs text-muted-foreground">
+                Click to seek, drag the playhead to scrub, or select segments to edit.
+              </p>
+            </div>
+            <VideoTimeline
+              segments={segments}
+              currentTime={state.currentTime}
+              selectedSegmentId={selectedSegmentId}
+              onSeek={seek}
+              onSegmentSelect={onSelectSegment}
+            />
+          </div>
+        </div>
+
+        <aside className="flex flex-col rounded-xl border border-border bg-secondary/30 p-6 h-full">
+          <div className="space-y-4 flex-1">
+            {selectedSegment ? (
+              (() => {
+                const curveValue =
+                  selectedSegment.customBezier ??
+                  getPresetBezier(selectedSegment.easingPreset ?? null) ??
+                  defaultBezier;
+                return (
+                  <>
+                    <div>
+                      <h4 className="text-2xl font-bold text-foreground">
+                        {selectedSegment.name}
+                      </h4>
+                      <p className="text-xs text-muted-foreground">
+                    Fine-tune duration and easing curve.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="segment-duration">Duration (sec)</Label>
+                  <div className="flex items-center gap-3">
+                  <input
+                    id="segment-duration"
+                    type="range"
+                    min={0.5}
+                    max={6}
+                    step={0.1}
+                    value={selectedSegment.duration ?? 1.5}
+                    onChange={(event) =>
+                      onDurationChange(selectedSegment.id, Number(event.target.value), applyAll)
+                    }
+                    className="h-2 flex-1 cursor-pointer rounded-full bg-primary/30"
+                  />
+                  <input
+                    type="number"
+                    min={0.1}
+                    step={0.1}
+                    value={(selectedSegment.duration ?? 1.5).toFixed(2)}
+                    onChange={(event) =>
+                      onDurationChange(selectedSegment.id, Number(event.target.value), applyAll)
+                    }
+                    className="w-20 rounded-md border border-border bg-background px-2 py-1 text-sm"
+                  />
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <Label>Ease Curve</Label>
+                    <select
+                      id="preset-select"
+                      value={selectedSegment.easingPreset ?? ''}
+                      onChange={(event) =>
+                        onPresetChange(selectedSegment.id, event.target.value, applyAll)
+                      }
+                      className="rounded-md border border-border bg-background px-3 py-2 text-sm"
+                    >
+                      {easingOptions.map((preset) => (
+                        <option key={preset} value={preset}>
+                          {preset}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <CubicBezierEditor
+                    value={curveValue}
+                    onChange={(nextValue) => onBezierChange(selectedSegment.id, nextValue, applyAll)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Drag the control points to sculpt a bespoke ease-in/ease-out profile for this
+                    segment.
+                  </p>
+                </div>
+
+                <div className="space-y-2 pt-2">
+                  <label className="flex items-center gap-2 text-sm text-foreground/90">
+                    <input
+                      type="checkbox"
+                      checked={applyAll}
+                      onChange={(event) => {
+                        const nextValue = event.target.checked;
+                        setApplyAll(nextValue);
+                        if (nextValue && selectedSegment) {
+                          onCloneSegmentSettings(selectedSegment.id);
+                        }
+                      }}
+                      className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                    />
+                    Apply settings to all videos
+                  </label>
+                  <Button
+                    size="sm"
+                    onClick={() => onUpdateVideo()}
+                    disabled={isUpdating}
+                    className="gap-2 w-full mt-2"
+                  >
+                    {isUpdating && <Loader2 className="h-4 w-4 animate-spin" />}
+                    {isUpdating ? 'Updating…' : 'Update Video'}
+                  </Button>
+                </div>
+                  </>
+                );
+              })()
+            ) : (
+              <div className="flex h-full flex-col items-center justify-center text-center text-sm text-muted-foreground">
+                <p>Select a segment in the timeline to edit its timing and ease curve.</p>
+              </div>
+            )}
+          </div>
+
+          <div className="border-t border-border/60 pt-4 mt-4">
+            <div className="flex gap-2">
+              <Button
+                onClick={onExit}
+                variant="outline"
+                className="flex-1"
+              >
+                Exit
+              </Button>
+              <Button
+                onClick={onDownload}
+                className="flex-1 gap-2"
+              >
+                <Play className="h-4 w-4" />
+                Download
+              </Button>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>
+  );
+}

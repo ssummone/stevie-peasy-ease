@@ -1,96 +1,36 @@
 'use client';
 
-import { useState } from 'react';
-import { Upload, Trash2, Play } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Upload, Play, PlayCircle, GripVertical, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { LightRays } from '@/components/ui/light-rays';
-import { ReplicateTokenInput } from '@/components/ReplicateTokenInput';
-import { GeneratedAngles } from '@/components/GeneratedAngles';
-import { VideoPreview } from '@/components/VideoPreview';
-import { VideosList } from '@/components/VideosList';
-import { VideoSettings, type VideoGenerationSettings } from '@/components/VideoSettings';
-import { ImageEditDialog } from '@/components/ImageEditDialog';
-import { useReplicateAPI } from '@/hooks/useReplicateAPI';
-import { ANGLE_CONFIGS } from '@/lib/angle-configs';
-import { GeneratedImage, GeneratedVideo, TransitionVideo } from '@/lib/types';
-
-type UploadMode = 'generate' | 'angles' | 'videos';
+import { BlurFade } from '@/components/ui/blur-fade';
+import { FinalVideoEditor } from '@/components/FinalVideoEditor';
+import { useFinalizeVideo } from '@/hooks/useFinalizeVideo';
+import { TransitionVideo, FinalVideo } from '@/lib/types';
+import TextPressure from '@/components/text/text-pressure';
+import {
+  DEFAULT_CUSTOM_BEZIER,
+  EASING_PRESETS,
+  getPresetBezier,
+} from '@/lib/easing-presets';
+import { DEFAULT_EASING } from '@/lib/speed-curve-config';
 
 export default function Home() {
-  const [uploadMode, setUploadMode] = useState<UploadMode>('generate');
-  const [isDragActive, setIsDragActive] = useState(false);
-  const [selectedImage, setSelectedImage] = useState<File | null>(null);
-  const [uploadedAngles, setUploadedAngles] = useState<File[]>([]);
   const [uploadedVideos, setUploadedVideos] = useState<File[]>([]);
-  const [showTokenInput, setShowTokenInput] = useState(false);
-  const [pendingOperation, setPendingOperation] = useState<'generateAngles' | 'generateVideos' | null>(null);
-  const [replicateToken, setReplicateToken] = useState<string | null>(null);
-  const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>([]);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [generatedVideo, setGeneratedVideo] = useState<GeneratedVideo | null>(null);
   const [transitionVideos, setTransitionVideos] = useState<TransitionVideo[]>([]);
-  const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
-  const [showVideoSettings, setShowVideoSettings] = useState(false);
-  const [videoSettings, setVideoSettings] = useState<VideoGenerationSettings>({
-    model: 'kling-2.1',
-    resolution: '720p',
-  });
-  const [showImageEditDialog, setShowImageEditDialog] = useState(false);
-  const [editingImageIndex, setEditingImageIndex] = useState<number | null>(null);
+  const [selectedSegmentId, setSelectedSegmentId] = useState<number | null>(null);
+  const [draggingVideoIndex, setDraggingVideoIndex] = useState<number | null>(null);
+  const [dropIndicatorIndex, setDropIndicatorIndex] = useState<number | null>(null);
+  const [finalVideo, setFinalVideo] = useState<FinalVideo | null>(null);
+  const [isFinalizingVideo, setIsFinalizingVideo] = useState(false);
+  const [finalizationProgress, setFinalizationProgress] = useState(0);
+  const [finalizationMessage, setFinalizationMessage] = useState('');
+  const [isDropZoneHovered, setIsDropZoneHovered] = useState(false);
 
-  // Note: Token is passed directly in generateAngles, not via hook
-  useReplicateAPI({
-    token: replicateToken || '',
-  });
-
-  const handleDrag = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.type === 'dragenter' || e.type === 'dragover') {
-      setIsDragActive(true);
-    } else if (e.type === 'dragleave') {
-      setIsDragActive(false);
-    }
-  };
-
-  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragActive(false);
-
-    const files = e.dataTransfer.files;
-    if (files && files[0] && files[0].type.startsWith('image/')) {
-      setSelectedImage(files[0]);
-    }
-  };
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (files && files[0]) {
-      setSelectedImage(files[0]);
-    }
-  };
-
-  const handleAnglesUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (files) {
-      const imageFiles = Array.from(files).filter((f) =>
-        f.type.startsWith('image/')
-      );
-      setUploadedAngles(imageFiles);
-
-      // Create generated images from uploaded files
-      if (imageFiles.length > 0) {
-        const images = imageFiles.slice(0, 4).map((file, index) => ({
-          angle: ANGLE_CONFIGS[index]?.name || `Angle ${index + 1}`,
-          url: URL.createObjectURL(file),
-          loading: false,
-        }));
-        setGeneratedImages(images);
-      }
-    }
-  };
+  const { finalizeVideos } = useFinalizeVideo();
 
   const handleVideosUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -100,696 +40,310 @@ export default function Home() {
       );
       setUploadedVideos(videoFiles);
 
-      // Use first video as preview
-      if (videoFiles[0]) {
-        setGeneratedVideo({
-          url: URL.createObjectURL(videoFiles[0]),
-          loading: false,
-        });
-      }
+      // Convert uploaded files to TransitionVideo format
+      const transitionVideos = videoFiles.map((file, index) => ({
+        id: index + 1,
+        name: file.name,
+        url: URL.createObjectURL(file),
+        loading: false,
+        duration: 1.5,
+        easingPreset: DEFAULT_EASING,
+        useCustomEasing: false,
+        customBezier: getPresetBezier(DEFAULT_EASING),
+      }));
+      setTransitionVideos(transitionVideos);
+      setSelectedSegmentId(transitionVideos[0]?.id ?? null);
     }
   };
 
-  const handleGoOnThen = async () => {
-    setPendingOperation('generateAngles');
-    setShowTokenInput(true);
+  const handleSelectSegment = (id: number) => {
+    setSelectedSegmentId(id);
   };
 
-  const handleTokenSubmit = async (token: string) => {
-    setReplicateToken(token);
-    setShowTokenInput(false);
+  const updateSegmentMetadata = (
+    id: number,
+    updates: Partial<TransitionVideo>,
+    applyAll: boolean = false
+  ) => {
+    setTransitionVideos((prev) =>
+      prev.map((segment) => {
+        const shouldUpdate = applyAll || segment.id === id;
+        if (!shouldUpdate) {
+          return segment;
+        }
 
-    if (pendingOperation === 'generateVideos') {
-      // Video generation was requested
-      setPendingOperation(null);
-      setShowVideoSettings(true);
-    } else {
-      // Default to angle generation
-      setPendingOperation(null);
-      await generateAngles(token);
+        const nextUpdates = { ...updates };
+        if (updates.customBezier) {
+          nextUpdates.customBezier = [...updates.customBezier] as [
+            number,
+            number,
+            number,
+            number
+          ];
+        }
+
+        return { ...segment, ...nextUpdates };
+      })
+    );
+  };
+
+  const handleSegmentDurationChange = (id: number, duration: number, applyAll = false) => {
+    const safeDuration = Number.isFinite(duration) ? Math.max(0.1, duration) : 0.1;
+    updateSegmentMetadata(id, { duration: safeDuration }, applyAll);
+  };
+
+  const handleSegmentPresetChange = (id: number, preset: string, applyAll = false) => {
+    updateSegmentMetadata(
+      id,
+      {
+        easingPreset: preset,
+        useCustomEasing: false,
+        customBezier: getPresetBezier(preset),
+      },
+      applyAll
+    );
+  };
+
+  const handleSegmentBezierChange = (
+    id: number,
+    bezier: [number, number, number, number],
+    applyAll = false
+  ) => {
+    updateSegmentMetadata(id, { customBezier: bezier, useCustomEasing: true }, applyAll);
+  };
+
+  useEffect(() => {
+    if (finalVideo && transitionVideos.length > 0 && selectedSegmentId === null) {
+      setSelectedSegmentId(transitionVideos[0].id);
     }
-  };
+  }, [finalVideo, transitionVideos, selectedSegmentId]);
 
-  const handleRegenerate = async (index: number) => {
-    if (!replicateToken) {
-      setShowTokenInput(true);
+  const handleCloneSegmentSettings = (id: number) => {
+    const sourceSegment = transitionVideos.find((segment) => segment.id === id);
+    if (!sourceSegment) {
       return;
     }
 
-    // Regenerate a single angle
-    const config = ANGLE_CONFIGS[index];
-    setGeneratedImages((prev) => {
-      const updated = [...prev];
-      updated[index] = {
-        angle: config.name,
-        url: '',
-        loading: true,
-      };
-      return updated;
-    });
+    const sourceCurve =
+      sourceSegment.customBezier ??
+      getPresetBezier(sourceSegment.easingPreset ?? DEFAULT_EASING);
 
-    try {
-      setIsGenerating(true);
-      const reader = new FileReader();
-      reader.onload = async (e) => {
-        const base64String = e.target?.result as string;
-
-        try {
-          const proxyResponse = await fetch('/api/replicate-proxy', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              token: replicateToken,
-              action: 'create-prediction',
-              payload: {
-                version: 'qwen/qwen-edit-multiangle',
-                input: {
-                  image: base64String,
-                  rotate_degrees: config.rotateDegrees,
-                  move_forward: config.moveForward,
-                  vertical_tilt: config.verticalTilt,
-                  aspect_ratio: 'match_input_image',
-                  go_fast: true,
-                  output_format: 'webp',
-                  output_quality: 95,
-                },
-              },
-            }),
-          });
-
-          if (!proxyResponse.ok) {
-            const error = await proxyResponse.json();
-            throw new Error(error.error || 'Failed to create prediction');
-          }
-
-          const prediction = await proxyResponse.json();
-          const predictionId = prediction.id;
-
-          // Poll for completion
-          let attempts = 0;
-          const maxAttempts = 300;
-          let currentPrediction = prediction;
-
-          while (
-            (currentPrediction.status === 'starting' ||
-              currentPrediction.status === 'processing') &&
-            attempts < maxAttempts
-          ) {
-            await new Promise((resolve) => setTimeout(resolve, 1000));
-            attempts++;
-
-            const pollResponse = await fetch('/api/replicate-proxy', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                token: replicateToken,
-                action: 'get-prediction',
-                payload: { predictionId },
-              }),
-            });
-
-            if (!pollResponse.ok) {
-              throw new Error('Failed to poll prediction status');
-            }
-
-            currentPrediction = await pollResponse.json();
-          }
-
-          if (currentPrediction.status === 'failed') {
-            throw new Error(currentPrediction.error || 'Prediction failed');
-          }
-
-          if (currentPrediction.status !== 'succeeded') {
-            throw new Error('Prediction did not complete in time');
-          }
-
-          const output = currentPrediction.output;
-          const imageUrl = Array.isArray(output) && output.length > 0 ? output[0] : null;
-
-          if (imageUrl) {
-            setGeneratedImages((prev) => {
-              const updated = [...prev];
-              updated[index] = {
-                angle: config.name,
-                url: imageUrl,
-                loading: false,
-              };
-              return updated;
-            });
-          } else {
-            setGeneratedImages((prev) => {
-              const updated = [...prev];
-              updated[index] = {
-                angle: config.name,
-                url: '',
-                loading: false,
-                error: 'Failed to generate image',
-              };
-              return updated;
-            });
-          }
-        } catch (err) {
-          const errorMsg =
-            err instanceof Error ? err.message : 'Unknown error';
-          console.error(`Error regenerating angle ${index}:`, errorMsg);
-          setGeneratedImages((prev) => {
-            const updated = [...prev];
-            updated[index] = {
-              angle: config.name,
-              url: '',
-              loading: false,
-              error: errorMsg,
-            };
-            return updated;
-          });
+    setTransitionVideos((prev) =>
+      prev.map((segment) => {
+        if (segment.id === id) {
+          return segment;
         }
-      };
-
-      reader.readAsDataURL(selectedImage!);
-    } finally {
-      setIsGenerating(false);
-    }
+        return {
+          ...segment,
+          duration: sourceSegment.duration,
+          easingPreset: sourceSegment.easingPreset,
+          useCustomEasing: sourceSegment.useCustomEasing,
+          customBezier: [...sourceCurve] as [number, number, number, number],
+        };
+      })
+    );
   };
 
-  const generateAngles = async (tokenToUse: string) => {
-    if (!selectedImage) return;
+  const handleReapplyFinalVideo = async () => {
+    await handleFinalizeVideo();
+  };
 
+  const handleFinalizeVideo = async (segmentsOverride?: TransitionVideo[]) => {
     try {
-      setIsGenerating(true);
-      setGeneratedImages(
-        ANGLE_CONFIGS.map((config) => ({
-          angle: config.name,
-          url: '',
-          loading: true,
-        }))
+      setIsFinalizingVideo(true);
+      setFinalizationProgress(0);
+      setFinalizationMessage('Initializing...');
+
+      const segmentsToFinalize = segmentsOverride ?? transitionVideos;
+
+      const finalBlob = await finalizeVideos(
+        segmentsToFinalize,
+        (progress) => {
+          setFinalizationProgress(progress.progress);
+          setFinalizationMessage(progress.message);
+        },
+        1.5
       );
 
-      // Convert File to base64 for Replicate API
-      const reader = new FileReader();
-      reader.onload = async (e) => {
-        const base64String = e.target?.result as string;
-
-        // Generate each angle
-        for (let i = 0; i < ANGLE_CONFIGS.length; i++) {
-          const config = ANGLE_CONFIGS[i];
-
-          try {
-            // Call the API directly with the token
-            const proxyResponse = await fetch('/api/replicate-proxy', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                token: tokenToUse,
-                action: 'create-prediction',
-                payload: {
-                  version: 'qwen/qwen-edit-multiangle',
-                  input: {
-                    image: base64String,
-                    rotate_degrees: config.rotateDegrees,
-                    move_forward: config.moveForward,
-                    vertical_tilt: config.verticalTilt,
-                    aspect_ratio: 'match_input_image',
-                    go_fast: true,
-                    output_format: 'webp',
-                    output_quality: 95,
-                  },
-                },
-              }),
-            });
-
-            if (!proxyResponse.ok) {
-              const error = await proxyResponse.json();
-              throw new Error(error.error || 'Failed to create prediction');
-            }
-
-            const prediction = await proxyResponse.json();
-            const predictionId = prediction.id;
-
-            // Poll for completion
-            let attempts = 0;
-            const maxAttempts = 300;
-            let currentPrediction = prediction;
-
-            while (
-              (currentPrediction.status === 'starting' ||
-                currentPrediction.status === 'processing') &&
-              attempts < maxAttempts
-            ) {
-              await new Promise((resolve) => setTimeout(resolve, 1000));
-              attempts++;
-
-              const pollResponse = await fetch('/api/replicate-proxy', {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                  token: tokenToUse,
-                  action: 'get-prediction',
-                  payload: { predictionId },
-                }),
-              });
-
-              if (!pollResponse.ok) {
-                throw new Error('Failed to poll prediction status');
-              }
-
-              currentPrediction = await pollResponse.json();
-            }
-
-            if (currentPrediction.status === 'failed') {
-              throw new Error(currentPrediction.error || 'Prediction failed');
-            }
-
-            if (currentPrediction.status !== 'succeeded') {
-              throw new Error('Prediction did not complete in time');
-            }
-
-            const output = currentPrediction.output;
-            const imageUrl = Array.isArray(output) && output.length > 0 ? output[0] : null;
-
-            if (imageUrl) {
-              setGeneratedImages((prev) => {
-                const updated = [...prev];
-                updated[i] = {
-                  angle: config.name,
-                  url: imageUrl,
-                  loading: false,
-                };
-                return updated;
-              });
-            } else {
-              setGeneratedImages((prev) => {
-                const updated = [...prev];
-                updated[i] = {
-                  angle: config.name,
-                  url: '',
-                  loading: false,
-                  error: 'Failed to generate image',
-                };
-                return updated;
-              });
-            }
-          } catch (err) {
-            const errorMsg =
-              err instanceof Error ? err.message : 'Unknown error';
-            console.error(`Error generating angle ${i}:`, errorMsg);
-            setGeneratedImages((prev) => {
-              const updated = [...prev];
-              updated[i] = {
-                angle: config.name,
-                url: '',
-                loading: false,
-                error: errorMsg,
-              };
-              return updated;
-            });
-          }
-        }
-      };
-
-      reader.readAsDataURL(selectedImage);
-    } finally {
-      setIsGenerating(false);
-    }
-  };
-
-  const handleEditImage = (index: number) => {
-    setEditingImageIndex(index);
-    setShowImageEditDialog(true);
-  };
-
-  const handleImageEditConfirm = (editedImageUrl: string) => {
-    if (editingImageIndex !== null) {
-      setGeneratedImages((prev) => {
-        const updated = [...prev];
-        updated[editingImageIndex] = {
-          ...updated[editingImageIndex],
-          url: editedImageUrl,
-        };
-        return updated;
-      });
-    }
-    setEditingImageIndex(null);
-  };
-
-  const handleGenerateVideo = async () => {
-    if (!selectedImage || generatedImages.length === 0 || !generatedImages[0].url) {
-      return;
-    }
-
-    if (!replicateToken) {
-      setPendingOperation('generateVideos');
-      setShowTokenInput(true);
-      return;
-    }
-
-    // Show settings dialog to let user choose model
-    setShowVideoSettings(true);
-  };
-
-  const generateSingleVideo = async (
-    startImage: string,
-    endImageUrl: string,
-    model: 'kling-2.1' | 'seedream-lite',
-    token: string
-  ): Promise<string | null> => {
-    let payload;
-
-    if (model === 'kling-2.1') {
-      payload = {
-        version: 'kwaivgi/kling-v2.1',
-        input: {
-          prompt: 'Smooth transition keeping the subject in frame the entire time',
-          start_image: startImage,
-          end_image: endImageUrl,
-          duration: 5,
-          mode: 'pro',
-        },
-      };
-    } else {
-      // Seedream-lite uses different parameters
-      payload = {
-        version: 'bytedance/seedance-1-lite',
-        input: {
-          prompt: 'Smooth transition keeping the subject in frame the entire time',
-          image: startImage,
-          last_frame_image: endImageUrl,
-          duration: 5,
-          resolution: '720p',
-          fps: 24,
-          camera_fixed: false,
-        },
-      };
-    }
-
-    const proxyResponse = await fetch('/api/replicate-proxy', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        token,
-        action: 'create-video',
-        payload,
-      }),
-    });
-
-    if (!proxyResponse.ok) {
-      const error = await proxyResponse.json();
-      throw new Error(error.error || 'Failed to create video');
-    }
-
-    const prediction = await proxyResponse.json();
-    let predictionId = prediction.id;
-
-    // Poll for completion
-    let attempts = 0;
-    const maxAttempts = 600; // 10 minutes with 1 second intervals
-    let currentPrediction = prediction;
-
-    while (
-      (currentPrediction.status === 'starting' ||
-        currentPrediction.status === 'processing') &&
-      attempts < maxAttempts
-    ) {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      attempts++;
-
-      const pollResponse = await fetch('/api/replicate-proxy', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          token,
-          action: 'get-video',
-          payload: { predictionId },
-        }),
-      });
-
-      if (!pollResponse.ok) {
-        throw new Error('Failed to poll video status');
+      if (!finalBlob) {
+        throw new Error('Failed to finalize video');
       }
 
-      currentPrediction = await pollResponse.json();
-    }
+      // Create object URL for preview and download
+      const objectUrl = URL.createObjectURL(finalBlob);
 
-    if (currentPrediction.status === 'failed') {
-      throw new Error(currentPrediction.error || 'Video generation failed');
-    }
+      setFinalVideo({
+        blob: finalBlob,
+        url: objectUrl,
+        size: finalBlob.size,
+        createdAt: new Date(),
+      });
 
-    if (currentPrediction.status !== 'succeeded') {
-      throw new Error('Video generation did not complete in time');
-    }
-
-    const output = currentPrediction.output;
-    // Handle both string and array output formats
-    const videoUrl = typeof output === 'string'
-      ? output
-      : (Array.isArray(output) && output.length > 0 ? output[0] : null);
-
-    console.log('Video generation completed:', {
-      status: currentPrediction.status,
-      output,
-      videoUrl,
-    });
-
-    return videoUrl;
-  };
-
-  const blobUrlToBase64 = async (blobUrl: string): Promise<string> => {
-    if (!blobUrl.startsWith('blob:')) {
-      return blobUrl; // Not a blob URL, return as-is
-    }
-    const response = await fetch(blobUrl);
-    const blob = await response.blob();
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-  };
-
-  const handleVideoSettingsConfirm = async (settings: VideoGenerationSettings) => {
-    setVideoSettings(settings);
-
-    try {
-      setIsGeneratingVideo(true);
-
-      // Initialize transition videos array (temporary: only 1 video for debugging)
-      const initialVideos: TransitionVideo[] = [
-        { id: 1, name: 'Original → Angle 1', url: '', loading: true },
-      ];
-      setTransitionVideos(initialVideos);
-
-      if (!selectedImage) {
-        throw new Error('No image selected');
-      }
-
-      // Convert user's original image to base64
-      const reader = new FileReader();
-      reader.onload = async (e) => {
-        const startImageBase64 = e.target?.result as string;
-
-        try {
-          // Convert any blob URLs to base64 (for manually uploaded angles)
-          const endImageUrl = await blobUrlToBase64(generatedImages[0].url);
-
-          // Temporary: Generate only first video for debugging
-          // TODO: Change back to all 5 videos once working
-          const videoConfigs = [
-            {
-              index: 0,
-              start: startImageBase64,
-              end: endImageUrl,
-              name: 'Original → Angle 1',
-            },
-          ];
-
-          // Generate each video and update state as they complete
-          for (const config of videoConfigs) {
-            try {
-              console.log(`Generating video ${config.index + 1}: ${config.name}`);
-              const videoUrl = await generateSingleVideo(
-                config.start,
-                config.end,
-                settings.model,
-                replicateToken!
-              );
-
-              // Update the specific video in the list
-              setTransitionVideos((prev) => {
-                const updated = [...prev];
-                updated[config.index] = {
-                  ...updated[config.index],
-                  url: videoUrl || '',
-                  loading: false,
-                };
-                return updated;
-              });
-            } catch (err) {
-              const errorMsg =
-                err instanceof Error ? err.message : 'Failed to generate video';
-              setTransitionVideos((prev) => {
-                const updated = [...prev];
-                updated[config.index] = {
-                  ...updated[config.index],
-                  loading: false,
-                  error: errorMsg,
-                };
-                return updated;
-              });
-            }
-          }
-        } catch (err) {
-          const errorMsg =
-            err instanceof Error ? err.message : 'Unknown error';
-          console.error('Error generating videos:', errorMsg);
-          // Mark all videos as failed
-          setTransitionVideos((prev) =>
-            prev.map((v) => ({
-              ...v,
-              loading: false,
-              error: errorMsg,
-            }))
-          );
-        }
-      };
-
-      reader.readAsDataURL(selectedImage);
+      setFinalizationMessage('Video finalized successfully!');
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Error finalizing video:', error);
+      setFinalizationMessage(`Error: ${errorMsg}`);
     } finally {
-      setIsGeneratingVideo(false);
+      setIsFinalizingVideo(false);
     }
+  };
+
+  const handleDownloadFinalVideo = () => {
+    if (!finalVideo) return;
+
+    const link = document.createElement('a');
+    link.href = finalVideo.url;
+    link.download = `easy-peasy-ease-${finalVideo.createdAt.getTime()}.mp4`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const reorderTransitionVideos = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0) {
+      return;
+    }
+    setTransitionVideos((prev) => {
+      const updated = [...prev];
+      const [moved] = updated.splice(fromIndex, 1);
+      updated.splice(toIndex, 0, moved);
+      return updated;
+    });
+  };
+
+  const handleVideoDragStart = (index: number) => (event: React.DragEvent<HTMLButtonElement>) => {
+    setDraggingVideoIndex(index);
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', index.toString());
+  };
+
+  const handleVideoDragOver = (index: number) => (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    if (draggingVideoIndex === null || draggingVideoIndex === index) {
+      setDropIndicatorIndex(null);
+      return;
+    }
+    event.dataTransfer.dropEffect = 'move';
+    setDropIndicatorIndex(index);
+  };
+
+  const handleVideoDrop = (index: number) => (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const sourceIndex =
+      draggingVideoIndex ?? Number.parseInt(event.dataTransfer.getData('text/plain'), 10);
+    if (Number.isNaN(sourceIndex)) {
+      setDraggingVideoIndex(null);
+      setDropIndicatorIndex(null);
+      return;
+    }
+    reorderTransitionVideos(sourceIndex, index);
+    setDraggingVideoIndex(null);
+    setDropIndicatorIndex(null);
+  };
+
+  const handleVideoDragEnd = () => {
+    setDraggingVideoIndex(null);
+    setDropIndicatorIndex(null);
+  };
+
+  const handlePlayTransitionVideo = (video: TransitionVideo) => {
+    if (!video.url || video.loading) {
+      return;
+    }
+    window.open(video.url, '_blank', 'noopener,noreferrer');
   };
 
   return (
     <div className="relative flex min-h-screen items-center justify-center bg-background overflow-hidden">
       <LightRays
         className="absolute inset-0 z-0"
-        color="rgba(160, 210, 255, 0.15)"
+        color={isDropZoneHovered ? "rgba(160, 210, 255, 0.17)" : "rgba(160, 210, 255, 0.15)"}
         count={7}
         speed={14}
+        length={isDropZoneHovered ? "85vh" : "70vh"}
       />
-      <main className="relative z-10 flex w-full max-w-2xl flex-col items-center justify-center gap-12 px-4 py-12">
-        {/* Header */}
-        <div className="flex flex-col items-center gap-3 text-center">
-          <h1 className="text-4xl font-bold tracking-tight text-foreground md:text-5xl">
-            Easy Peasy Ease
-          </h1>
-          {!selectedImage && uploadedAngles.length === 0 && uploadedVideos.length === 0 && (
-            <p className="max-w-lg text-lg text-muted-foreground">
-              Make a fancy ease curved video from a single image.
-            </p>
-          )}
-        </div>
-
-        {/* Upload Mode Selector */}
-        {!selectedImage && uploadedAngles.length === 0 && uploadedVideos.length === 0 && (
-          <div className="flex gap-2 justify-center flex-wrap">
-            <Button
-              variant={uploadMode === 'generate' ? 'default' : 'outline'}
-              onClick={() => setUploadMode('generate')}
-              size="sm"
-            >
-              Generate from Image
-            </Button>
-            <Button
-              variant={uploadMode === 'angles' ? 'default' : 'outline'}
-              onClick={() => setUploadMode('angles')}
-              size="sm"
-            >
-              Upload Angles
-            </Button>
-            <Button
-              variant={uploadMode === 'videos' ? 'default' : 'outline'}
-              onClick={() => setUploadMode('videos')}
-              size="sm"
-            >
-              Upload Videos
-            </Button>
-          </div>
+      <main
+        className={cn(
+          'relative z-10 flex w-full flex-col items-center justify-center gap-12 px-4 py-12',
+          finalVideo ? 'max-w-none items-stretch justify-start px-10 py-16 lg:px-16' : 'max-w-2xl'
         )}
-
-        {/* Upload Area - Generate from Image */}
-        {!selectedImage && uploadMode === 'generate' && (
-          <div
-            onDragEnter={handleDrag}
-            onDragLeave={handleDrag}
-            onDragOver={handleDrag}
-            onDrop={handleDrop}
-            className={cn(
-              'relative w-full cursor-pointer rounded-lg border-2 border-dashed transition-all',
-              isDragActive
-                ? 'border-primary bg-primary/5'
-                : 'border-muted-foreground/30 hover:border-muted-foreground/50'
-            )}
-          >
-            <input
-              type="file"
-              accept="image/*"
-              onChange={handleChange}
-              className="hidden"
-              id="image-input"
+      >
+        {finalVideo ? (
+          <section className="w-full min-h-[calc(100vh-5rem)] space-y-8 px-4 md:px-10">
+            <FinalVideoEditor
+              finalVideo={finalVideo}
+              segments={transitionVideos}
+              selectedSegmentId={selectedSegmentId}
+              easingOptions={EASING_PRESETS}
+              onSelectSegment={handleSelectSegment}
+              onDurationChange={handleSegmentDurationChange}
+              onPresetChange={handleSegmentPresetChange}
+              onBezierChange={handleSegmentBezierChange}
+              defaultBezier={DEFAULT_CUSTOM_BEZIER}
+              onCloneSegmentSettings={handleCloneSegmentSettings}
+              onUpdateVideo={handleReapplyFinalVideo}
+              isUpdating={isFinalizingVideo}
+              onExit={() => {
+                setFinalVideo(null);
+                setTransitionVideos([]);
+                setUploadedVideos([]);
+                setSelectedSegmentId(null);
+              }}
+              onDownload={handleDownloadFinalVideo}
             />
-            <label
-              htmlFor="image-input"
-              className="flex flex-col items-center justify-center gap-4 px-6 py-16"
-            >
-              <Upload className="h-10 w-10 text-muted-foreground" />
-              <div className="flex flex-col items-center gap-2 text-center">
-                <p className="text-sm font-semibold text-foreground">
-                  Click to upload or drag and drop
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  PNG, JPG, JPEG (up to 10MB)
-                </p>
-              </div>
-            </label>
-          </div>
-        )}
 
-        {/* Upload Area - Upload Angles */}
-        {uploadMode === 'angles' && uploadedAngles.length === 0 && (
-          <div className="w-full space-y-4">
-            <div className="rounded-lg border-2 border-dashed border-muted-foreground/30 p-8 text-center hover:border-muted-foreground/50 transition-colors">
-              <input
-                type="file"
-                accept="image/*"
-                onChange={handleAnglesUpload}
-                className="hidden"
-                id="angles-input"
-                multiple
-              />
-              <label
-                htmlFor="angles-input"
-                className="flex flex-col items-center justify-center gap-4 cursor-pointer"
-              >
-                <Upload className="h-10 w-10 text-muted-foreground" />
-                <div className="flex flex-col items-center gap-2">
-                  <p className="text-sm font-semibold text-foreground">
-                    Upload 4 angle images
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    PNG, JPG, JPEG - Select all 4 images at once
-                  </p>
+            <Dialog open={isFinalizingVideo}>
+              <DialogContent className="max-w-sm">
+                <DialogTitle className="sr-only">Video Processing</DialogTitle>
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <p className="font-semibold text-foreground">
+                      {finalizationMessage}
+                    </p>
+                    <div className="flex items-center justify-between text-sm text-muted-foreground">
+                      <span>Processing...</span>
+                      <span>{Math.round(finalizationProgress)}%</span>
+                    </div>
+                  </div>
+                  <div className="h-2 w-full overflow-hidden rounded-full bg-secondary">
+                    <div
+                      className="h-full bg-primary transition-all duration-300"
+                      style={{ width: `${finalizationProgress}%` }}
+                    />
+                  </div>
                 </div>
-              </label>
-            </div>
+              </DialogContent>
+            </Dialog>
+          </section>
+        ) : (
+          <>
+        {/* Header */}
+        <BlurFade>
+          <div className="flex flex-col items-center gap-3 text-center">
+            <TextPressure
+              text="EasyPeasyEase"
+              fontFamily="var(--font-inter-variable)"
+              weight={true}
+              width={false}
+              italic={false}
+              alpha={false}
+              flex={true}
+              minFontSize={80}
+              className="text-8xl md:text-[140px] font-bold tracking-tight text-foreground"
+            />
+            {uploadedVideos.length === 0 && (
+              <p className="max-w-lg text-lg text-muted-foreground">
+                Apply custom easing curves to your videos
+              </p>
+            )}
           </div>
-        )}
+        </BlurFade>
 
         {/* Upload Area - Upload Videos */}
-        {uploadMode === 'videos' && uploadedVideos.length === 0 && (
-          <div className="w-full space-y-4">
-            <div className="rounded-lg border-2 border-dashed border-muted-foreground/30 p-8 text-center hover:border-muted-foreground/50 transition-colors">
+        {uploadedVideos.length === 0 && (
+          <BlurFade delay={0.2} className="w-full">
+            <div className="w-full space-y-4">
               <input
                 type="file"
                 accept="video/*"
@@ -798,119 +352,42 @@ export default function Home() {
                 id="videos-input"
                 multiple
               />
-              <label
-                htmlFor="videos-input"
-                className="flex flex-col items-center justify-center gap-4 cursor-pointer"
+              <div
+                className="rounded-lg border-2 border-dashed border-muted-foreground/30 p-12 text-center hover:border-muted-foreground/50 transition-colors min-h-[300px] flex items-center justify-center cursor-pointer"
+                onMouseEnter={() => setIsDropZoneHovered(true)}
+                onMouseLeave={() => setIsDropZoneHovered(false)}
+                onClick={() => document.getElementById('videos-input')?.click()}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    document.getElementById('videos-input')?.click();
+                  }
+                }}
+                tabIndex={0}
+                role="button"
+                aria-label="Click to upload videos"
               >
-                <Upload className="h-10 w-10 text-muted-foreground" />
-                <div className="flex flex-col items-center gap-2">
-                  <p className="text-sm font-semibold text-foreground">
-                    Upload 5 transition videos
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    MP4, WebM - Select all 5 videos at once
-                  </p>
-                </div>
-              </label>
-            </div>
-          </div>
-        )}
-
-        {/* Selected Image Preview */}
-        {selectedImage && (
-          <div className="flex flex-col items-center gap-6 w-full">
-            {/* Image Container with Delete Button */}
-            <div className="relative w-full flex justify-center">
-              <img
-                src={URL.createObjectURL(selectedImage)}
-                alt="Preview"
-                className="max-h-96 max-w-full rounded-lg border border-border"
-              />
-              <Button
-                onClick={() => setSelectedImage(null)}
-                variant="outline"
-                size="icon"
-                className="absolute top-4 right-4"
-                aria-label="Delete image"
-              >
-                <Trash2 className="h-5 w-5" />
-              </Button>
-            </div>
-
-            {/* Go On Then Button */}
-            <Button size="lg" onClick={handleGoOnThen} disabled={isGenerating}>
-              {isGenerating ? 'Generating...' : 'Go on then'}
-            </Button>
-          </div>
-        )}
-
-        {/* Uploaded Angles Preview */}
-        {uploadedAngles.length > 0 && (
-          <div className="w-full space-y-6">
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold">
-                  Uploaded Angles ({uploadedAngles.length})
-                </h3>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setUploadedAngles([]);
-                    setGeneratedImages([]);
-                  }}
-                >
-                  Reset
-                </Button>
-              </div>
-              <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-                {uploadedAngles.map((file, index) => (
-                  <div key={index} className="flex flex-col gap-2">
-                    <img
-                      src={URL.createObjectURL(file)}
-                      alt={`Angle ${index + 1}`}
-                      className="w-full aspect-square object-cover rounded-lg border border-border"
-                    />
-                    <p className="text-xs text-muted-foreground text-center truncate">
-                      {file.name}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Original Image Upload for Angles Mode */}
-            {!selectedImage && (
-              <div className="rounded-lg border-2 border-dashed border-muted-foreground/30 p-8 text-center hover:border-muted-foreground/50 transition-colors">
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleChange}
-                  className="hidden"
-                  id="original-image-input"
-                />
-                <label
-                  htmlFor="original-image-input"
-                  className="flex flex-col items-center justify-center gap-4 cursor-pointer"
-                >
+                <div className="flex flex-col items-center justify-center gap-4">
                   <Upload className="h-10 w-10 text-muted-foreground" />
                   <div className="flex flex-col items-center gap-2">
                     <p className="text-sm font-semibold text-foreground">
-                      Upload original image
+                      Upload your videos
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      This will be the start and end point of the video loop
+                      MP4, WebM - Select one or more videos
                     </p>
                   </div>
-                </label>
+                </div>
               </div>
-            )}
-          </div>
+            </div>
+          </BlurFade>
         )}
+
 
         {/* Uploaded Videos Preview */}
         {uploadedVideos.length > 0 && (
-          <div className="w-full space-y-4">
+          <BlurFade delay={0.2} className="w-full">
+            <div className="w-full space-y-6">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-semibold">
                 Uploaded Videos ({uploadedVideos.length})
@@ -920,116 +397,142 @@ export default function Home() {
                 size="sm"
                 onClick={() => {
                   setUploadedVideos([]);
-                  setGeneratedVideo(null);
+                  setTransitionVideos([]);
+                  setFinalVideo(null);
+                  setSelectedSegmentId(null);
                 }}
               >
                 Reset
               </Button>
             </div>
-            <div className="space-y-2">
-              {uploadedVideos.map((file, index) => (
-                <div key={index} className="text-sm text-muted-foreground">
-                  {index + 1}. {file.name}
-                </div>
-              ))}
+
+            {/* Videos List with Reordering */}
+            <div className="space-y-3">
+              {transitionVideos.map((video, index) => {
+                const isDragging = draggingVideoIndex === index;
+                const statusText = video.loading
+                  ? 'Generating...'
+                  : video.error
+                    ? `Error: ${video.error}`
+                    : video.url
+                      ? 'Ready to finalize'
+                      : 'Pending';
+                const statusColor = video.error
+                  ? 'text-destructive'
+                  : video.loading
+                    ? 'text-muted-foreground'
+                    : 'text-emerald-500';
+
+                return (
+                  <div key={video.id}>
+                    <div
+                      className={cn(
+                        'flex items-center gap-3 rounded-lg border border-border/80 bg-secondary/50 p-4 transition-colors',
+                        isDragging && 'ring-2 ring-primary/40 bg-secondary'
+                      )}
+                      onDragOver={handleVideoDragOver(index)}
+                      onDrop={handleVideoDrop(index)}
+                    >
+                    <button
+                      type="button"
+                      className="flex h-8 w-8 items-center justify-center rounded-md border border-dashed border-border/70 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary cursor-grab"
+                      draggable
+                      onDragStart={handleVideoDragStart(index)}
+                      onDragEnd={handleVideoDragEnd}
+                      aria-label={`Reorder ${video.name}`}
+                    >
+                      <GripVertical className="h-4 w-4" />
+                    </button>
+
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="text-primary hover:bg-primary/10 disabled:text-muted-foreground"
+                      onClick={() => handlePlayTransitionVideo(video)}
+                      disabled={!video.url || video.loading}
+                    >
+                      <PlayCircle className="h-5 w-5" />
+                    </Button>
+
+                    <div className="flex-1 min-w-0 flex items-center gap-3">
+                      {video.url && (
+                        <video
+                          src={video.url}
+                          className="h-12 w-16 rounded-md object-cover flex-shrink-0 bg-secondary"
+                        />
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-sm truncate">
+                          {index + 1}. {video.name}
+                        </p>
+                        <p className={cn('text-xs mt-1', statusColor)}>{statusText}</p>
+                      </div>
+                    </div>
+
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="text-muted-foreground hover:text-foreground hover:bg-secondary/80"
+                      onClick={() => {
+                        setTransitionVideos((prev) => prev.filter((v) => v.id !== video.id));
+                        setUploadedVideos((prev) => prev.filter((f) => f.name !== video.name));
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                    </div>
+                    {dropIndicatorIndex === index && (
+                      <div className="h-0.5 bg-primary mt-2 mb-1" />
+                    )}
+                  </div>
+                );
+              })}
             </div>
-          </div>
-        )}
 
-        {/* Generated Angles Grid */}
-        {generatedImages.length > 0 && (
-          <div className="w-full space-y-6">
-            <GeneratedAngles
-              images={generatedImages}
-              onRegenerate={uploadedAngles.length === 0 ? handleRegenerate : undefined}
-              onEdit={handleEditImage}
-              isRegenerating={isGenerating}
-            />
-
-            {/* Generate Video Button */}
-            {!generatedVideo && generatedImages.every((img) => img.url) && selectedImage && (
+            {/* Finalize Button for Uploaded Videos */}
+            {transitionVideos.every((v) => v.url && !v.loading) && !isFinalizingVideo && (
               <div className="flex justify-center">
                 <Button
                   size="lg"
-                  onClick={handleGenerateVideo}
-                  disabled={isGeneratingVideo}
+                  onClick={() => handleFinalizeVideo()}
                   className="gap-2"
                 >
                   <Play className="h-4 w-4" />
-                  {isGeneratingVideo ? 'Generating Video...' : 'Generate Video'}
+                  {finalVideo ? 'Finalize Again' : 'Finalize & Stitch Videos'}
                 </Button>
               </div>
             )}
 
-          </div>
-        )}
-
-        {/* Transition Videos List */}
-        {transitionVideos.length > 0 && (
-          <div className="w-full space-y-6">
-            <VideosList
-              videos={transitionVideos}
-              isGenerating={isGeneratingVideo}
-            />
-
-            {/* Regenerate Button */}
-            {!isGeneratingVideo && transitionVideos.some((v) => v.url && !v.loading) && (
-              <div className="flex justify-center gap-3">
-                <Button
-                  size="lg"
-                  variant="outline"
-                  onClick={() => setTransitionVideos([])}
-                >
-                  Back to Angles
-                </Button>
-                <Button
-                  size="lg"
-                  onClick={handleGenerateVideo}
-                  className="gap-2"
-                >
-                  <Play className="h-4 w-4" />
-                  Regenerate Videos
-                </Button>
+            {/* Finalization Progress */}
+            {isFinalizingVideo && (
+              <div className="w-full space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-semibold text-foreground">
+                    {finalizationMessage}
+                  </p>
+                  <span className="text-sm text-muted-foreground">
+                    {Math.round(finalizationProgress)}%
+                  </span>
+                </div>
+                <div className="w-full bg-secondary rounded-full h-2 overflow-hidden">
+                  <div
+                    className="bg-primary h-full transition-all duration-300"
+                    style={{ width: `${finalizationProgress}%` }}
+                  />
+                </div>
               </div>
             )}
-          </div>
+            </div>
+          </BlurFade>
         )}
 
-        {/* Video Preview (Legacy) */}
-        {generatedVideo && transitionVideos.length === 0 && (
-          <div className="w-full">
-            <VideoPreview
-              video={generatedVideo}
-              onRegenerate={handleGenerateVideo}
-            />
-          </div>
+        </>
         )}
       </main>
 
-      {/* Replicate Token Input Modal */}
-      <ReplicateTokenInput
-        open={showTokenInput}
-        onTokenSubmit={handleTokenSubmit}
-        isLoading={isGenerating}
-      />
-
-      {/* Video Settings Modal */}
-      <VideoSettings
-        isOpen={showVideoSettings}
-        onClose={() => setShowVideoSettings(false)}
-        onConfirm={handleVideoSettingsConfirm}
-      />
-
-      {/* Image Edit Dialog */}
-      {editingImageIndex !== null && (
-        <ImageEditDialog
-          isOpen={showImageEditDialog}
-          onClose={() => setShowImageEditDialog(false)}
-          imageUrl={generatedImages[editingImageIndex].url}
-          onConfirm={handleImageEditConfirm}
-          replicateToken={replicateToken}
-        />
-      )}
     </div>
   );
 }
+

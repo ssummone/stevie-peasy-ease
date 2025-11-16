@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState, type CSSProperties } from "react"
-import { motion } from "motion/react"
+import { motion, useMotionValue, useMotionTemplate, animate } from "motion/react"
 
 import { cn } from "@/lib/utils"
 
@@ -96,14 +96,29 @@ export function LightRays({
   ...props
 }: LightRaysProps) {
   const [rays, setRays] = useState<LightRay[]>([])
+  const opacityValue = useMotionValue(0.15)
   const cycleDuration = Math.max(speed, 0.1)
+
+  // Extract opacity from color string and animate it
+  useEffect(() => {
+    const match = color.match(/[\d.]+\)$/)
+    if (match) {
+      const opacity = parseFloat(match[0])
+      animate(opacityValue, opacity, {
+        duration: 0.9,
+        ease: "easeInOut",
+      })
+    }
+  }, [color, opacityValue])
 
   useEffect(() => {
     setRays(createRays(count, cycleDuration))
   }, [count, cycleDuration])
 
+  const animatedColor = useMotionTemplate`rgba(160, 210, 255, ${opacityValue})`
+
   return (
-    <div
+    <motion.div
       ref={ref}
       className={cn(
         "pointer-events-none absolute inset-0 isolate overflow-hidden rounded-[inherit]",
@@ -111,12 +126,13 @@ export function LightRays({
       )}
       style={
         {
-          "--light-rays-color": color,
+          "--light-rays-color": animatedColor,
           "--light-rays-blur": `${blur}px`,
           "--light-rays-length": length,
           ...style,
         } as CSSProperties
       }
+      transition={{ duration: 0.9, ease: "easeInOut" }}
       {...props}
     >
       <div className="absolute inset-0 overflow-hidden">
@@ -144,6 +160,6 @@ export function LightRays({
           <Ray key={ray.id} {...ray} />
         ))}
       </div>
-    </div>
+    </motion.div>
   )
 }
