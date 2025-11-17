@@ -1,3 +1,5 @@
+'use client';
+
 import { ReactNode, useEffect, useRef, useState } from 'react';
 import { TransitionVideo } from '@/lib/types';
 import {
@@ -10,7 +12,7 @@ import {
 import { cn } from '@/lib/utils';
 import { extractVideoThumbnail } from '@/lib/timeline-utils';
 
-const MIN_VISIBLE_SECONDS = 3;
+export const TIMELINE_MIN_VISIBLE_SECONDS = 3;
 
 const lerp = (start: number, end: number, value: number) =>
   start + (end - start) * value;
@@ -26,6 +28,8 @@ interface VideoTimelineProps {
     pixelsPerSecond: number;
     totalDuration: number;
   }) => ReactNode;
+  zoomValue: number;
+  onZoomChange: (value: number) => void;
 }
 
 interface ZoomSliderProps {
@@ -34,7 +38,7 @@ interface ZoomSliderProps {
   disabled?: boolean;
 }
 
-function ZoomSlider({ value, onValueChange, disabled }: ZoomSliderProps) {
+export function TimelineZoomSlider({ value, onValueChange, disabled }: ZoomSliderProps) {
   const sliderRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
 
@@ -99,25 +103,20 @@ function ZoomSlider({ value, onValueChange, disabled }: ZoomSliderProps) {
   }, [isDragging, disabled]);
 
   return (
-    <div className="flex items-center gap-3">
-      <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        Zoom
-      </span>
+    <div
+      ref={sliderRef}
+      className={cn(
+        'relative h-8 w-[100px] cursor-pointer select-none touch-none',
+        disabled && 'cursor-not-allowed opacity-50'
+      )}
+      onMouseDown={handleMouseDown}
+      onTouchStart={handleTouchStart}
+    >
+      <div className="absolute left-0 right-0 top-1/2 h-1 -translate-y-1/2 rounded-full bg-border/60" />
       <div
-        ref={sliderRef}
-        className={cn(
-          'relative h-8 w-[200px] cursor-pointer select-none touch-none',
-          disabled && 'cursor-not-allowed opacity-50'
-        )}
-        onMouseDown={handleMouseDown}
-        onTouchStart={handleTouchStart}
-      >
-        <div className="absolute left-0 right-0 top-1/2 h-1 -translate-y-1/2 rounded-full bg-border/60" />
-        <div
-          className="absolute top-1/2 h-6 w-6 -translate-y-1/2 -translate-x-1/2 rounded-full border border-primary/40 bg-primary shadow-lg transition-transform touch-none"
-          style={{ left: `${value * 100}%` }}
-        />
-      </div>
+        className="absolute top-1/2 h-5 w-5 -translate-y-1/2 -translate-x-1/2 rounded-full border border-primary/40 bg-primary shadow-lg transition-transform touch-none"
+        style={{ left: `${value * 100}%` }}
+      />
     </div>
   );
 }
@@ -129,27 +128,28 @@ export function VideoTimeline({
   onSeek,
   onSegmentSelect,
   renderAudioTrack,
+  zoomValue,
+  onZoomChange,
 }: VideoTimelineProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [thumbnails, setThumbnails] = useState<Record<number, string>>({});
   const [viewportWidth, setViewportWidth] = useState(0);
-  const [zoomValue, setZoomValue] = useState(0);
 
   const totalDuration = getTotalDuration(segments);
   const normalizedTime = totalDuration > 0 ? currentTime % totalDuration : currentTime;
   const boundaries = calculateSegmentBoundaries(segments);
-  const zoomDisabled = totalDuration === 0 || totalDuration <= MIN_VISIBLE_SECONDS;
+  const zoomDisabled = totalDuration === 0 || totalDuration <= TIMELINE_MIN_VISIBLE_SECONDS;
 
   const safeViewportWidth = viewportWidth || 0;
   const normalizedZoom = clamp(zoomValue, 0, 1);
 
   const targetVisibleSeconds =
     totalDuration === 0
-      ? MIN_VISIBLE_SECONDS
+      ? TIMELINE_MIN_VISIBLE_SECONDS
       : zoomDisabled
       ? totalDuration
-      : lerp(totalDuration, MIN_VISIBLE_SECONDS, normalizedZoom);
+      : lerp(totalDuration, TIMELINE_MIN_VISIBLE_SECONDS, normalizedZoom);
 
   const pixelsPerSecond =
     safeViewportWidth > 0 && targetVisibleSeconds > 0
@@ -165,9 +165,9 @@ export function VideoTimeline({
   // Keep zoom slider sensible when the timeline shrinks
   useEffect(() => {
     if (zoomDisabled && zoomValue !== 0) {
-      setZoomValue(0);
+      onZoomChange(0);
     }
-  }, [zoomDisabled, zoomValue]);
+  }, [zoomDisabled, zoomValue, onZoomChange]);
 
   // Measure the scroll viewport width
   useEffect(() => {
@@ -188,8 +188,16 @@ export function VideoTimeline({
       return () => observer.disconnect();
     }
 
-    window.addEventListener('resize', updateWidth);
-    return () => window.removeEventListener('resize', updateWidth);
+    const resizeTarget =
+      typeof globalThis !== 'undefined' && 'addEventListener' in globalThis
+        ? (globalThis as Window & typeof globalThis)
+        : null;
+    if (!resizeTarget) {
+      return undefined;
+    }
+
+    resizeTarget.addEventListener('resize', updateWidth);
+    return () => resizeTarget.removeEventListener('resize', updateWidth);
   }, []);
 
   // Extract thumbnails for each segment
@@ -285,21 +293,24 @@ export function VideoTimeline({
     }
   }, [isDragging, playheadPosition, safeViewportWidth, trackWidth]);
 
+  const handleTimelineWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+    const viewport = viewportRef.current;
+    if (!viewport || trackWidth <= safeViewportWidth) return;
+
+    const isVerticalDominant = Math.abs(event.deltaY) > Math.abs(event.deltaX);
+    if (!isVerticalDominant || event.deltaY === 0) return;
+
+    event.preventDefault();
+    viewport.scrollLeft += event.deltaY;
+  };
+
   return (
     <div className="space-y-2 min-w-0 w-full max-w-full">
-      <div className="flex items-center justify-between">
-        <p className="text-sm font-medium text-muted-foreground">Timeline</p>
-        <ZoomSlider
-          disabled={zoomDisabled}
-          value={zoomValue}
-          onValueChange={setZoomValue}
-        />
-      </div>
-
       <div className="w-full min-w-0">
         <div
           ref={viewportRef}
-          className="w-full max-w-full min-w-0 overflow-x-auto rounded-lg border border-border bg-secondary/30"
+          className="timeline-scrollbar w-full max-w-full min-w-0 overflow-x-auto rounded-lg border border-border bg-secondary/30"
+          onWheel={handleTimelineWheel}
         >
           <div className="relative space-y-4" style={{ width: `${trackWidth}px` }}>
             {/* Time Ruler */}
@@ -361,7 +372,9 @@ export function VideoTimeline({
                       {/* Segment Name */}
                       <div className="absolute bottom-0 left-0 right-0 p-2">
                         <p className="text-xs font-medium text-white truncate">
-                          {boundary.segment.name}
+                          {boundary.segment.loopIteration && boundary.segment.loopIteration > 1
+                            ? `${boundary.segment.name} • Loop ${boundary.segment.loopIteration}`
+                            : boundary.segment.name}
                         </p>
                       </div>
                     </div>

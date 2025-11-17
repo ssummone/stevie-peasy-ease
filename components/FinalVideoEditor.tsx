@@ -1,19 +1,33 @@
 'use client';
 
-import { useState } from 'react';
+import { ChangeEvent, useState } from 'react';
 import { FinalVideo, TransitionVideo, AudioProcessingOptions } from '@/lib/types';
 import { Label } from '@/components/ui/label';
 import { CubicBezierEditor } from '@/components/CubicBezierEditor';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Loader2, Play } from 'lucide-react';
 import { getPresetBezier } from '@/lib/easing-presets';
 import { useVideoPlayback } from '@/hooks/useVideoPlayback';
 import { VideoPlaybackControls } from '@/components/VideoPlaybackControls';
-import { VideoTimeline } from '@/components/VideoTimeline';
-import { getCurrentSegment } from '@/lib/timeline-utils';
+import {
+  VideoTimeline,
+  TimelineZoomSlider,
+  TIMELINE_MIN_VISIBLE_SECONDS,
+} from '@/components/VideoTimeline';
+import { getCurrentSegment, getTotalDuration } from '@/lib/timeline-utils';
 import { AudioUploadBox } from '@/components/AudioUploadBox';
 import { AudioWaveformVisualization } from '@/components/AudioWaveformVisualization';
 import { useAudioVisualization } from '@/hooks/useAudioVisualization';
+
+const LOOP_OPTIONS = [1, 2, 3] as const;
 
 interface FinalVideoEditorProps {
   finalVideo: FinalVideo;
@@ -30,6 +44,8 @@ interface FinalVideoEditorProps {
   isUpdating: boolean;
   onExit: () => void;
   onDownload: () => void;
+  loopCount: number;
+  onLoopCountChange: (next: number) => void;
 }
 
 export function FinalVideoEditor({
@@ -47,6 +63,8 @@ export function FinalVideoEditor({
   isUpdating,
   onExit,
   onDownload,
+  loopCount,
+  onLoopCountChange,
 }: FinalVideoEditorProps) {
   const selectedSegment = segments.find((segment) => segment.id === selectedSegmentId) ?? null;
   const [applyAll, setApplyAll] = useState(false);
@@ -55,8 +73,13 @@ export function FinalVideoEditor({
   const [audioSettings, setAudioSettings] = useState<AudioProcessingOptions>({
     fadeIn: 0.5,
     fadeOut: 0.5,
-    loopTwice: false,
   });
+  const [updatePromptReason, setUpdatePromptReason] = useState<'loop' | 'audio' | null>(null);
+  const [timelineZoom, setTimelineZoom] = useState(0);
+
+  const totalTimelineDuration = getTotalDuration(segments);
+  const timelineZoomDisabled =
+    totalTimelineDuration === 0 || totalTimelineDuration <= TIMELINE_MIN_VISIBLE_SECONDS;
 
   // Audio visualization
   const { waveformData, isLoading: isAudioLoading } = useAudioVisualization(audioFile);
@@ -77,6 +100,7 @@ export function FinalVideoEditor({
 
   const handleAudioSelect = (file: File) => {
     setAudioFile(file);
+    setUpdatePromptReason('audio');
   };
 
   const handleRemoveAudio = () => {
@@ -99,10 +123,49 @@ export function FinalVideoEditor({
     }));
   };
 
+  const handleLoopDropdownChange = (event: ChangeEvent<HTMLSelectElement>) => {
+    const nextValue = Number(event.target.value);
+    if (nextValue === loopCount) return;
+    onLoopCountChange(nextValue);
+    setUpdatePromptReason('loop');
+  };
+
+  const handleVideoUpdate = () => {
+    onUpdateVideo({
+      audioBlob: audioFile ?? undefined,
+      audioSettings,
+    });
+    setUpdatePromptReason(null);
+  };
+
+  const handlePromptOpenChange = (open: boolean) => {
+    if (!open) {
+      setUpdatePromptReason(null);
+    }
+  };
+
+  const showUpdatePrompt = updatePromptReason !== null;
+  const promptCopy =
+    updatePromptReason === 'audio'
+      ? {
+          title: 'Update video to mix your audio',
+          description: 'We need to restitch the clips with the uploaded track so you can preview it.',
+        }
+      : updatePromptReason === 'loop'
+      ? {
+          title: 'Update video to apply your loop count',
+          description: 'Duplicated clips require a fresh render to reflect easing or duration tweaks.',
+        }
+      : {
+          title: '',
+          description: '',
+        };
+
   return (
-    <div className="w-full space-y-6">
-      <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
-        <div className="space-y-6 min-w-0">
+    <>
+      <div className="w-full space-y-6">
+        <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
+          <div className="space-y-6 min-w-0">
           <div className="relative aspect-video w-full overflow-hidden rounded-xl border border-border bg-black">
             <video
               key={finalVideo.url}
@@ -116,15 +179,41 @@ export function FinalVideoEditor({
 
           {/* Playback Controls */}
           <div>
-            <VideoPlaybackControls
-              isPlaying={state.isPlaying}
-              currentTime={state.currentTime}
-              duration={state.duration}
-              onPlayPause={togglePlayPause}
-              videoSize={finalVideo.size}
-              createdAt={finalVideo.createdAt}
-            />
-          </div>
+              <VideoPlaybackControls
+                isPlaying={state.isPlaying}
+                currentTime={state.currentTime}
+                duration={state.duration}
+                onPlayPause={togglePlayPause}
+                videoSize={finalVideo.size}
+                createdAt={finalVideo.createdAt}
+                actions={
+                  <div className="flex flex-wrap items-center gap-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    <label className="flex items-center gap-2">
+                      <span>Loops</span>
+                      <select
+                        value={loopCount}
+                        onChange={handleLoopDropdownChange}
+                        className="rounded-md border border-border bg-background py-1 pl-2 pr-6 text-[11px] font-semibold uppercase tracking-widest text-foreground"
+                      >
+                        {LOOP_OPTIONS.map((option) => (
+                          <option key={option} value={option}>
+                            x{option}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <div className="flex items-center gap-4">
+                      <span>Zoom</span>
+                      <TimelineZoomSlider
+                        disabled={timelineZoomDisabled}
+                        value={timelineZoom}
+                        onValueChange={setTimelineZoom}
+                      />
+                    </div>
+                  </div>
+                }
+              />
+            </div>
 
           {/* Timeline */}
           <div>
@@ -134,7 +223,9 @@ export function FinalVideoEditor({
               selectedSegmentId={selectedSegmentId}
               onSeek={seek}
               onSegmentSelect={handleSegmentSelect}
-              renderAudioTrack={({ trackWidth }) => (
+              zoomValue={timelineZoom}
+              onZoomChange={setTimelineZoom}
+              renderAudioTrack={({ trackWidth, pixelsPerSecond, totalDuration }) => (
                 <div className="space-y-1">
                   {!waveformData ? (
                     <AudioUploadBox onAudioSelect={handleAudioSelect} disabled={isAudioLoading} />
@@ -145,10 +236,11 @@ export function FinalVideoEditor({
                       isLoading={isAudioLoading}
                       onRemove={handleRemoveAudio}
                       currentTime={state.currentTime}
-                      duration={state.duration}
+                      timelineDuration={totalDuration}
                       onSelect={handleAudioTrackSelect}
                       isSelected={inspectorView === 'audio'}
                       trackWidth={trackWidth}
+                      pixelsPerSecond={pixelsPerSecond}
                     />
                   )}
                 </div>
@@ -218,32 +310,9 @@ export function FinalVideoEditor({
                   </div>
                 </div>
 
-                <div className="space-y-3 rounded-lg border border-border/70 bg-muted/10 p-4">
-                  <label className="flex items-center gap-3 text-sm font-medium text-foreground/90">
-                    <input
-                      type="checkbox"
-                      checked={audioSettings.loopTwice}
-                      onChange={(event) =>
-                        setAudioSettings((prev) => ({ ...prev, loopTwice: event.target.checked }))
-                      }
-                      className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
-                    />
-                    Loop video twice with continuous music
-                  </label>
-                  <p className="text-xs text-muted-foreground">
-                    Ensures the final render plays two seamless orbits while the uploaded track keeps
-                    playing without restarting.
-                  </p>
-                </div>
-
                 <Button
                   size="sm"
-                  onClick={() =>
-                    onUpdateVideo({
-                      audioBlob: audioFile ?? undefined,
-                      audioSettings,
-                    })
-                  }
+                  onClick={handleVideoUpdate}
                   disabled={isUpdating}
                   className="gap-2 w-full"
                 >
@@ -257,16 +326,27 @@ export function FinalVideoEditor({
                   selectedSegment.customBezier ??
                   getPresetBezier(selectedSegment.easingPreset ?? null) ??
                   defaultBezier;
+                const loopIterationLabel =
+                  selectedSegment.loopIteration && selectedSegment.loopIteration > 1
+                    ? `Loop ${selectedSegment.loopIteration}`
+                    : null;
                 return (
                   <>
                     <div>
-                      <h4 className="text-2xl font-bold text-foreground">
-                        {selectedSegment.name}
-                      </h4>
+                      <div className="flex items-center gap-3">
+                        <h4 className="text-2xl font-bold text-foreground">
+                          {selectedSegment.name}
+                        </h4>
+                        {loopIterationLabel && (
+                          <span className="rounded-full border border-border/70 bg-background px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                            {loopIterationLabel}
+                          </span>
+                        )}
+                      </div>
                       <p className="text-xs text-muted-foreground">
-                    Fine-tune duration and easing curve.
-                  </p>
-                </div>
+                        Fine-tune duration and easing curve.
+                      </p>
+                    </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="segment-duration">Duration (sec)</Label>
@@ -305,7 +385,7 @@ export function FinalVideoEditor({
                       onChange={(event) =>
                         onPresetChange(selectedSegment.id, event.target.value, applyAll)
                       }
-                      className="rounded-md border border-border bg-background px-3 py-2 text-sm"
+                      className="rounded-md border border-border bg-background py-2 pl-3 pr-8 text-sm"
                     >
                       {easingOptions.map((preset) => (
                         <option key={preset} value={preset}>
@@ -342,12 +422,7 @@ export function FinalVideoEditor({
                   </label>
                   <Button
                     size="sm"
-                    onClick={() =>
-                      onUpdateVideo({
-                        audioBlob: audioFile ?? undefined,
-                        audioSettings,
-                      })
-                    }
+                    onClick={handleVideoUpdate}
                     disabled={isUpdating}
                     className="gap-2 w-full mt-2"
                   >
@@ -385,7 +460,26 @@ export function FinalVideoEditor({
           </div>
         </aside>
       </div>
-    </div>
+      </div>
+
+      <Dialog open={showUpdatePrompt} onOpenChange={handlePromptOpenChange}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{promptCopy.title}</DialogTitle>
+            <DialogDescription>{promptCopy.description}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setUpdatePromptReason(null)} disabled={isUpdating}>
+              Later
+            </Button>
+            <Button onClick={handleVideoUpdate} disabled={isUpdating} className="gap-2">
+              {isUpdating && <Loader2 className="h-4 w-4 animate-spin" />}
+              Update video
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 

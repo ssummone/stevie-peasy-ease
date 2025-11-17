@@ -272,6 +272,8 @@ export const useApplySpeedCurve = (): UseApplySpeedCurveReturn => {
 
         updateProgress('processing', 'Finalizing output...', 95);
 
+        // Ensure encoder flushes SPS/PPS before finalizing
+        await videoSource.close();
         // Step 5: Finalize and get output blob
         await output.finalize();
         const buffer = bufferTarget.buffer;

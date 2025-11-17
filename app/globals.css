@@ -143,3 +143,32 @@
     @apply bg-background text-foreground;
   }
 }
+
+.timeline-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--border) 70%, transparent) color-mix(
+        in srgb,
+        var(--background) 70%,
+        transparent
+      );
+  scrollbar-gutter: stable both-edges;
+}
+
+.timeline-scrollbar::-webkit-scrollbar {
+  height: 12px;
+}
+
+.timeline-scrollbar::-webkit-scrollbar-track {
+  background: color-mix(in srgb, var(--background) 80%, transparent);
+  border-radius: 999px;
+}
+
+.timeline-scrollbar::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: 999px;
+  border: 2px solid color-mix(in srgb, var(--background) 80%, transparent);
+}
+
+.timeline-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--border) 100%, transparent);
+}

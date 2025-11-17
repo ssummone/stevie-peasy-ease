@@ -220,9 +220,11 @@ export const useStitchVideos = (): UseStitchVideosReturn => {
         if (audioSource && pendingAudioBuffer) {
           updateProgress('processing', 'Encoding audio track...', 92);
           await audioSource.add(pendingAudioBuffer);
-          audioSource.close();
+          await audioSource.close();
         }
 
+        // Flush encoder before finalizing container
+        await videoSource.close();
         updateProgress('processing', 'Finalizing stitched video...', 97);
 
         // Finalize output

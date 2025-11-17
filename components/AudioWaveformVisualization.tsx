@@ -12,10 +12,11 @@ interface AudioWaveformVisualizationProps {
   isLoading?: boolean;
   onRemove?: () => void;
   currentTime?: number;
-  duration?: number;
+  timelineDuration: number;
   onSelect?: () => void;
   isSelected?: boolean;
-  trackWidth?: number;
+  trackWidth: number;
+  pixelsPerSecond: number;
 }
 
 export function AudioWaveformVisualization({
@@ -24,10 +25,11 @@ export function AudioWaveformVisualization({
   isLoading = false,
   onRemove,
   currentTime = 0,
-  duration = 0,
+  timelineDuration,
   onSelect,
   isSelected = false,
   trackWidth,
+  pixelsPerSecond,
 }: AudioWaveformVisualizationProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -57,24 +59,47 @@ export function AudioWaveformVisualization({
     // Clear canvas with transparent background
     ctx.clearRect(0, 0, width, height);
 
-    // Draw waveform
+    const audioDuration = waveformData.duration ?? 0;
+    const visibleAudioDuration =
+      timelineDuration > 0 && audioDuration > 0
+        ? Math.min(audioDuration, timelineDuration)
+        : audioDuration;
+
+    const safePixelsPerSecond =
+      pixelsPerSecond > 0
+        ? pixelsPerSecond
+        : visibleAudioDuration > 0
+        ? width / visibleAudioDuration
+        : width;
+    const visibleWaveformWidth = Math.min(
+      width,
+      Math.max(visibleAudioDuration * safePixelsPerSecond, 0)
+    );
+
     const peaks = waveformData.peaks;
-    const barWidth = width / peaks.length;
+    const visibleRatio =
+      audioDuration > 0 ? Math.min(1, visibleAudioDuration / audioDuration) : 1;
+    const visiblePeakCount = Math.max(
+      1,
+      Math.round(peaks.length * visibleRatio)
+    );
+    const barWidth =
+      visiblePeakCount > 0 ? visibleWaveformWidth / visiblePeakCount : 0;
 
     ctx.fillStyle = primaryColor;
 
-    for (let i = 0; i < peaks.length; i++) {
+    for (let i = 0; i < visiblePeakCount; i++) {
       const peak = peaks[i] ?? 0;
       const barHeight = (peak * height) / 2;
-      const x = i * barWidth;
+      const x = i * Math.max(barWidth, 0);
       const y = height / 2 - barHeight / 2;
 
-      ctx.fillRect(x, y, Math.max(1, barWidth - 1), barHeight);
+      ctx.fillRect(x, y, Math.max(1, Math.max(barWidth, 0) - 1), barHeight);
     }
 
     // Draw playback position indicator
-    if (duration > 0 && currentTime >= 0) {
-      const progressX = (currentTime / duration) * width;
+    if (timelineDuration > 0 && currentTime >= 0) {
+      const progressX = Math.min((currentTime / timelineDuration) * width, width);
       ctx.strokeStyle = primaryColor;
       ctx.lineWidth = 2;
       ctx.beginPath();
@@ -82,7 +107,7 @@ export function AudioWaveformVisualization({
       ctx.lineTo(progressX, height);
       ctx.stroke();
     }
-  }, [waveformData, currentTime, duration, trackWidth]);
+  }, [waveformData, currentTime, timelineDuration, trackWidth, pixelsPerSecond]);
 
   if (!waveformData) {
     return null;
@@ -100,10 +125,18 @@ export function AudioWaveformVisualization({
     }
   };
 
+  const audioDurationSeconds = waveformData.duration ?? 0;
+  const visibleAudioDuration = Math.min(
+    audioDurationSeconds,
+    timelineDuration > 0 ? timelineDuration : audioDurationSeconds
+  );
+  const hasOverflow =
+    timelineDuration > 0 && audioDurationSeconds > timelineDuration;
+
   return (
     <div
       className="w-full space-y-2"
-      style={trackWidth ? { width: `${trackWidth}px` } : undefined}
+      style={{ width: `${trackWidth}px` }}
     >
       <div
         role={onSelect ? 'button' : undefined}
@@ -137,6 +170,13 @@ export function AudioWaveformVisualization({
           className="h-[96px] w-full bg-secondary/50"
           aria-label={`${fileName} waveform`}
         />
+        {hasOverflow && (
+          <div className="pointer-events-none absolute inset-y-0 right-0 flex w-24 items-center justify-end bg-gradient-to-l from-background/90 via-background/10 to-transparent pr-3">
+            <span className="rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-background">
+              More audio
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );

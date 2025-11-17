@@ -23,10 +23,70 @@ type AudioFinalizeOptions = {
   audioSettings?: AudioProcessingOptions;
 };
 
+const ensureLoopIterations = (segments: TransitionVideo[]): TransitionVideo[] =>
+  segments.map((segment) =>
+    segment.loopIteration
+      ? segment
+      : {
+          ...segment,
+          loopIteration: 1,
+        }
+  );
+
+const syncSegmentsToLoopCount = (
+  segments: TransitionVideo[],
+  targetLoopCount: number
+): TransitionVideo[] => {
+  if (segments.length === 0) {
+    return segments;
+  }
+
+  const normalized = ensureLoopIterations(segments);
+  const currentMaxLoop = normalized.reduce(
+    (max, segment) => Math.max(max, segment.loopIteration ?? 1),
+    1
+  );
+
+  if (targetLoopCount <= currentMaxLoop) {
+    return normalized.filter(
+      (segment) => (segment.loopIteration ?? 1) <= targetLoopCount
+    );
+  }
+
+  let updatedSegments = [...normalized];
+  let loopCursor = currentMaxLoop;
+  let nextId = updatedSegments.reduce((max, segment) => Math.max(max, segment.id), 0) + 1;
+
+  while (loopCursor < targetLoopCount) {
+    const sourceSegments = updatedSegments.filter(
+      (segment) => (segment.loopIteration ?? 1) === loopCursor
+    );
+    const fallbackSegments = updatedSegments.filter(
+      (segment) => (segment.loopIteration ?? 1) === 1
+    );
+    const segmentsToClone = sourceSegments.length > 0 ? sourceSegments : fallbackSegments;
+
+    const clonedSegments = segmentsToClone.map((segment) => ({
+      ...segment,
+      id: nextId++,
+      loopIteration: loopCursor + 1,
+      customBezier: segment.customBezier
+        ? [...segment.customBezier] as [number, number, number, number]
+        : undefined,
+    }));
+
+    updatedSegments = [...updatedSegments, ...clonedSegments];
+    loopCursor += 1;
+  }
+
+  return updatedSegments;
+};
+
 export default function Home() {
   const [uploadedVideos, setUploadedVideos] = useState<File[]>([]);
   const [transitionVideos, setTransitionVideos] = useState<TransitionVideo[]>([]);
   const [selectedSegmentId, setSelectedSegmentId] = useState<number | null>(null);
+  const [loopCount, setLoopCount] = useState(1);
   const [draggingVideoIndex, setDraggingVideoIndex] = useState<number | null>(null);
   const [dropIndicatorIndex, setDropIndicatorIndex] = useState<number | null>(null);
   const [finalVideo, setFinalVideo] = useState<FinalVideo | null>(null);
@@ -55,14 +115,35 @@ export default function Home() {
         easingPreset: DEFAULT_EASING,
         useCustomEasing: false,
         customBezier: getPresetBezier(DEFAULT_EASING),
+        loopIteration: 1,
       }));
       setTransitionVideos(transitionVideos);
+      setLoopCount(1);
       setSelectedSegmentId(transitionVideos[0]?.id ?? null);
     }
   };
 
   const handleSelectSegment = (id: number) => {
     setSelectedSegmentId(id);
+  };
+
+  const handleLoopCountChange = (nextLoop: number) => {
+    if (nextLoop === loopCount) {
+      return;
+    }
+    setTransitionVideos((prev) => {
+      const nextSegments = syncSegmentsToLoopCount(prev, nextLoop);
+      if (nextSegments.length === 0) {
+        setSelectedSegmentId(null);
+      } else if (
+        selectedSegmentId === null ||
+        !nextSegments.some((segment) => segment.id === selectedSegmentId)
+      ) {
+        setSelectedSegmentId(nextSegments[0].id);
+      }
+      return nextSegments;
+    });
+    setLoopCount(nextLoop);
   };
 
   const updateSegmentMetadata = (
@@ -149,21 +230,6 @@ export default function Home() {
     );
   };
 
-  const createLoopedSegments = (segments: TransitionVideo[]): TransitionVideo[] => {
-    const maxId = segments.reduce((max, segment) => Math.max(max, segment.id), 0);
-    return [
-      ...segments,
-      ...segments.map((segment, index) => ({
-        ...segment,
-        id: maxId + index + 1,
-        name: `${segment.name} (loop 2)`,
-        customBezier: segment.customBezier
-          ? [...segment.customBezier] as [number, number, number, number]
-          : undefined,
-      })),
-    ];
-  };
-
   const handleReapplyFinalVideo = async (options?: AudioFinalizeOptions) => {
     await handleFinalizeVideo(undefined, options);
   };
@@ -178,10 +244,7 @@ export default function Home() {
       setFinalizationMessage('Initializing...');
 
       const baseSegments = segmentsOverride ?? transitionVideos;
-      const shouldLoopTwice = Boolean(options?.audioBlob && options?.audioSettings?.loopTwice);
-      const segmentsToFinalize = shouldLoopTwice
-        ? createLoopedSegments(baseSegments)
-        : baseSegments;
+      const segmentsToFinalize = syncSegmentsToLoopCount(baseSegments, loopCount);
 
       const finalBlob = await finalizeVideos(
         segmentsToFinalize,
@@ -323,8 +386,11 @@ export default function Home() {
                 setTransitionVideos([]);
                 setUploadedVideos([]);
                 setSelectedSegmentId(null);
+                setLoopCount(1);
               }}
               onDownload={handleDownloadFinalVideo}
+              loopCount={loopCount}
+              onLoopCountChange={handleLoopCountChange}
             />
 
             <Dialog open={isFinalizingVideo}>

@@ -53,6 +53,7 @@ export interface TransitionVideo {
   easingPreset?: string;
   useCustomEasing?: boolean;
   customBezier?: [number, number, number, number];
+  loopIteration?: number;
 }
 
 export interface KlingVideoInput {
@@ -73,7 +74,6 @@ export interface AudioTrack {
 export interface AudioProcessingOptions {
   fadeIn: number;
   fadeOut: number;
-  loopTwice: boolean;
 }
 
 export interface FinalVideo {
