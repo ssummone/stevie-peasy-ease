@@ -4,7 +4,7 @@ import { useState, useCallback } from 'react';
 import { useApplySpeedCurve } from './useApplySpeedCurve';
 import { useStitchVideos } from './useStitchVideos';
 import { useAudioMixing } from './useAudioMixing';
-import { TransitionVideo } from '@/lib/types';
+import { TransitionVideo, AudioProcessingOptions } from '@/lib/types';
 import { DEFAULT_OUTPUT_DURATION, DEFAULT_EASING } from '@/lib/speed-curve-config';
 import { createBezierEasing, type EasingFunction } from '@/lib/easing-functions';
 
@@ -22,7 +22,8 @@ interface UseFinalizeVideoReturn {
     transitionVideos: TransitionVideo[],
     onProgress?: (progress: FinalizeProgress) => void,
     inputDuration?: number,
-    audioBlob?: Blob
+    audioBlob?: Blob,
+    audioSettings?: AudioProcessingOptions
   ) => Promise<Blob | null>;
   progress: FinalizeProgress;
   reset: () => void;
@@ -49,7 +50,8 @@ export const useFinalizeVideo = (): UseFinalizeVideoReturn => {
       transitionVideos: TransitionVideo[],
       onProgress?: (progress: FinalizeProgress) => void,
       inputDuration: number = 5,
-      audioBlob?: Blob
+      audioBlob?: Blob,
+      audioSettings?: AudioProcessingOptions
     ): Promise<Blob | null> => {
       try {
         // Validate inputs
@@ -183,7 +185,8 @@ export const useFinalizeVideo = (): UseFinalizeVideoReturn => {
                 };
                 setProgress(progressUpdate);
                 onProgress?.(progressUpdate);
-              }
+              },
+              audioSettings
             );
           } catch (audioError) {
             const errorMsg = audioError instanceof Error ? audioError.message : 'Failed to process audio';

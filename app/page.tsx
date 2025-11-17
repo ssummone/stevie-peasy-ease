@@ -9,7 +9,7 @@ import { LightRays } from '@/components/ui/light-rays';
 import { BlurFade } from '@/components/ui/blur-fade';
 import { FinalVideoEditor } from '@/components/FinalVideoEditor';
 import { useFinalizeVideo } from '@/hooks/useFinalizeVideo';
-import { TransitionVideo, FinalVideo } from '@/lib/types';
+import { TransitionVideo, FinalVideo, AudioProcessingOptions } from '@/lib/types';
 import TextPressure from '@/components/text/text-pressure';
 import {
   DEFAULT_CUSTOM_BEZIER,
@@ -17,6 +17,11 @@ import {
   getPresetBezier,
 } from '@/lib/easing-presets';
 import { DEFAULT_EASING } from '@/lib/speed-curve-config';
+
+type AudioFinalizeOptions = {
+  audioBlob?: Blob;
+  audioSettings?: AudioProcessingOptions;
+};
 
 export default function Home() {
   const [uploadedVideos, setUploadedVideos] = useState<File[]>([]);
@@ -144,17 +149,39 @@ export default function Home() {
     );
   };
 
-  const handleReapplyFinalVideo = async (audioBlob?: Blob) => {
-    await handleFinalizeVideo(undefined, audioBlob);
+  const createLoopedSegments = (segments: TransitionVideo[]): TransitionVideo[] => {
+    const maxId = segments.reduce((max, segment) => Math.max(max, segment.id), 0);
+    return [
+      ...segments,
+      ...segments.map((segment, index) => ({
+        ...segment,
+        id: maxId + index + 1,
+        name: `${segment.name} (loop 2)`,
+        customBezier: segment.customBezier
+          ? [...segment.customBezier] as [number, number, number, number]
+          : undefined,
+      })),
+    ];
   };
 
-  const handleFinalizeVideo = async (segmentsOverride?: TransitionVideo[], audioBlob?: Blob) => {
+  const handleReapplyFinalVideo = async (options?: AudioFinalizeOptions) => {
+    await handleFinalizeVideo(undefined, options);
+  };
+
+  const handleFinalizeVideo = async (
+    segmentsOverride?: TransitionVideo[],
+    options?: AudioFinalizeOptions
+  ) => {
     try {
       setIsFinalizingVideo(true);
       setFinalizationProgress(0);
       setFinalizationMessage('Initializing...');
 
-      const segmentsToFinalize = segmentsOverride ?? transitionVideos;
+      const baseSegments = segmentsOverride ?? transitionVideos;
+      const shouldLoopTwice = Boolean(options?.audioBlob && options?.audioSettings?.loopTwice);
+      const segmentsToFinalize = shouldLoopTwice
+        ? createLoopedSegments(baseSegments)
+        : baseSegments;
 
       const finalBlob = await finalizeVideos(
         segmentsToFinalize,
@@ -163,7 +190,8 @@ export default function Home() {
           setFinalizationMessage(progress.message);
         },
         1.5,
-        audioBlob
+        options?.audioBlob,
+        options?.audioSettings
       );
 
       if (!finalBlob) {
@@ -541,4 +569,3 @@ export default function Home() {
     </div>
   );
 }
-

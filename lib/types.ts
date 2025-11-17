@@ -70,6 +70,12 @@ export interface AudioTrack {
   duration?: number;
 }
 
+export interface AudioProcessingOptions {
+  fadeIn: number;
+  fadeOut: number;
+  loopTwice: boolean;
+}
+
 export interface FinalVideo {
   blob: Blob;
   url: string; // Object URL for preview/download

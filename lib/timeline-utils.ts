@@ -49,16 +49,19 @@ export function getCurrentSegment(
   currentTime: number,
   segments: TransitionVideo[]
 ): TransitionVideo | null {
+  const totalDuration = getTotalDuration(segments);
+  const normalizedTime =
+    totalDuration > 0 ? currentTime % totalDuration : currentTime;
   const boundaries = calculateSegmentBoundaries(segments);
 
   for (const boundary of boundaries) {
-    if (currentTime >= boundary.startTime && currentTime < boundary.endTime) {
+    if (normalizedTime >= boundary.startTime && normalizedTime < boundary.endTime) {
       return boundary.segment;
     }
   }
 
   // If we're at the very end, return the last segment
-  if (boundaries.length > 0 && currentTime >= boundaries[boundaries.length - 1].endTime) {
+  if (boundaries.length > 0 && normalizedTime >= boundaries[boundaries.length - 1].endTime) {
     return boundaries[boundaries.length - 1].segment;
   }
 

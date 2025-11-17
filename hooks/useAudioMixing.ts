@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback } from 'react';
+import { AudioProcessingOptions } from '@/lib/types';
 import {
   Input,
   AudioBufferSink,
@@ -24,7 +25,8 @@ interface UseAudioMixingReturn {
   prepareAudio: (
     audioBlob: Blob,
     videoDuration: number,
-    onProgress?: (progress: AudioMixProgress) => void
+    onProgress?: (progress: AudioMixProgress) => void,
+    options?: AudioProcessingOptions
   ) => Promise<AudioData | null>;
 }
 
@@ -37,7 +39,8 @@ export const useAudioMixing = (): UseAudioMixingReturn => {
     async (
       audioBlob: Blob,
       videoDuration: number,
-      onProgress?: (progress: AudioMixProgress) => void
+      onProgress?: (progress: AudioMixProgress) => void,
+      options?: AudioProcessingOptions
     ): Promise<AudioData | null> => {
       try {
         onProgress?.({ message: 'Loading audio file...', progress: 10 });
@@ -124,6 +127,8 @@ export const useAudioMixing = (): UseAudioMixingReturn => {
           }
         }
 
+        applyFades(mergedBuffer, options);
+
         onProgress?.({ message: 'Audio ready for mixing', progress: 95 });
 
         return {
@@ -141,3 +146,51 @@ export const useAudioMixing = (): UseAudioMixingReturn => {
 
   return { prepareAudio };
 };
+
+function applyFades(buffer: AudioBuffer, options?: AudioProcessingOptions) {
+  if (!options) {
+    return;
+  }
+
+  const fadeInSeconds = Math.max(0, options.fadeIn ?? 0);
+  const fadeOutSeconds = Math.max(0, options.fadeOut ?? 0);
+  if (fadeInSeconds === 0 && fadeOutSeconds === 0) {
+    return;
+  }
+
+  const totalSamples = buffer.length;
+  if (totalSamples === 0) {
+    return;
+  }
+
+  let fadeInSamples = Math.min(totalSamples, Math.floor(fadeInSeconds * buffer.sampleRate));
+  let fadeOutSamples = Math.min(totalSamples, Math.floor(fadeOutSeconds * buffer.sampleRate));
+
+  if (fadeInSamples + fadeOutSamples > totalSamples) {
+    const scale = totalSamples / Math.max(1, fadeInSamples + fadeOutSamples);
+    fadeInSamples = Math.floor(fadeInSamples * scale);
+    fadeOutSamples = Math.floor(fadeOutSamples * scale);
+  }
+
+  for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
+    const channelData = buffer.getChannelData(channel);
+
+    if (fadeInSamples > 0) {
+      for (let i = 0; i < fadeInSamples; i++) {
+        const gain = i / fadeInSamples;
+        channelData[i] *= gain;
+      }
+    }
+
+    if (fadeOutSamples > 0) {
+      for (let i = 0; i < fadeOutSamples; i++) {
+        const sampleIndex = totalSamples - fadeOutSamples + i;
+        if (sampleIndex < 0 || sampleIndex >= totalSamples) {
+          continue;
+        }
+        const gain = (fadeOutSamples - i) / fadeOutSamples;
+        channelData[sampleIndex] *= gain;
+      }
+    }
+  }
+}

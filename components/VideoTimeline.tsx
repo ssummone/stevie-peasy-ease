@@ -32,6 +32,7 @@ export function VideoTimeline({
   const [trackWidth, setTrackWidth] = useState(0);
 
   const totalDuration = getTotalDuration(segments);
+  const normalizedTime = totalDuration > 0 ? currentTime % totalDuration : currentTime;
   const boundaries = calculateSegmentBoundaries(segments);
 
   // Measure track width
@@ -115,7 +116,7 @@ export function VideoTimeline({
   }, [isDragging, totalDuration, onSeek]);
 
   // Calculate playhead position using tracked width
-  const playheadPosition = timeToPixels(currentTime, totalDuration, trackWidth);
+  const playheadPosition = timeToPixels(normalizedTime, totalDuration, trackWidth);
 
   return (
     <div className="space-y-2">
@@ -144,7 +145,7 @@ export function VideoTimeline({
               ((boundary.endTime - boundary.startTime) / totalDuration) * 100;
             const isSelected = boundary.segment.id === selectedSegmentId;
             const isPlaying =
-              currentTime >= boundary.startTime && currentTime < boundary.endTime;
+              normalizedTime >= boundary.startTime && normalizedTime < boundary.endTime;
 
             return (
               <div

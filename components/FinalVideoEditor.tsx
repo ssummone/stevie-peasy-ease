@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { FinalVideo, TransitionVideo } from '@/lib/types';
+import { FinalVideo, TransitionVideo, AudioProcessingOptions } from '@/lib/types';
 import { Label } from '@/components/ui/label';
 import { CubicBezierEditor } from '@/components/CubicBezierEditor';
 import { Button } from '@/components/ui/button';
@@ -26,7 +26,7 @@ interface FinalVideoEditorProps {
   onBezierChange: (id: number, bezier: [number, number, number, number], applyAll?: boolean) => void;
   defaultBezier: [number, number, number, number];
   onCloneSegmentSettings: (id: number) => void;
-  onUpdateVideo: (audioBlob?: Blob) => void;
+  onUpdateVideo: (options?: { audioBlob?: Blob; audioSettings?: AudioProcessingOptions }) => void;
   isUpdating: boolean;
   onExit: () => void;
   onDownload: () => void;
@@ -51,16 +51,27 @@ export function FinalVideoEditor({
   const selectedSegment = segments.find((segment) => segment.id === selectedSegmentId) ?? null;
   const [applyAll, setApplyAll] = useState(false);
   const [audioFile, setAudioFile] = useState<File | null>(null);
+  const [inspectorView, setInspectorView] = useState<'segments' | 'audio'>('segments');
+  const [audioSettings, setAudioSettings] = useState<AudioProcessingOptions>({
+    fadeIn: 0.5,
+    fadeOut: 0.5,
+    loopTwice: false,
+  });
 
   // Audio visualization
   const { waveformData, isLoading: isAudioLoading } = useAudioVisualization(audioFile);
+
+  const handleSegmentSelect = (segmentId: number) => {
+    setInspectorView('segments');
+    onSelectSegment(segmentId);
+  };
 
   // Video playback control
   const { videoRef, state, togglePlayPause, seek } = useVideoPlayback((currentTime) => {
     // Auto-select segment based on playback position
     const currentSegment = getCurrentSegment(currentTime, segments);
     if (currentSegment && currentSegment.id !== selectedSegmentId) {
-      onSelectSegment(currentSegment.id);
+      handleSegmentSelect(currentSegment.id);
     }
   });
 
@@ -70,6 +81,22 @@ export function FinalVideoEditor({
 
   const handleRemoveAudio = () => {
     setAudioFile(null);
+    if (inspectorView === 'audio') {
+      setInspectorView('segments');
+    }
+  };
+
+  const handleAudioTrackSelect = () => {
+    if (!waveformData) return;
+    setInspectorView('audio');
+  };
+
+  const updateAudioSetting = (property: 'fadeIn' | 'fadeOut', value: number) => {
+    const sanitizedValue = Number.isNaN(value) ? 0 : value;
+    setAudioSettings((prev) => ({
+      ...prev,
+      [property]: Math.min(Math.max(sanitizedValue, 0), 10),
+    }));
   };
 
   return (
@@ -106,7 +133,7 @@ export function FinalVideoEditor({
               currentTime={state.currentTime}
               selectedSegmentId={selectedSegmentId}
               onSeek={seek}
-              onSegmentSelect={onSelectSegment}
+              onSegmentSelect={handleSegmentSelect}
             />
           </div>
 
@@ -122,6 +149,8 @@ export function FinalVideoEditor({
                 onRemove={handleRemoveAudio}
                 currentTime={state.currentTime}
                 duration={state.duration}
+                onSelect={handleAudioTrackSelect}
+                isSelected={inspectorView === 'audio'}
               />
             )}
           </div>
@@ -129,7 +158,99 @@ export function FinalVideoEditor({
 
         <aside className="flex flex-col rounded-xl border border-border bg-secondary/30 p-6 h-full">
           <div className="space-y-4 flex-1">
-            {selectedSegment ? (
+            {inspectorView === 'audio' && waveformData ? (
+              <div className="space-y-6">
+                <div>
+                  <h4 className="text-2xl font-bold text-foreground">Audio Settings</h4>
+                  <p className="text-xs text-muted-foreground">
+                    Shape fade envelopes and looping for the background track.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="audio-fade-in">Fade in (sec)</Label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      id="audio-fade-in"
+                      type="range"
+                      min={0}
+                      max={10}
+                      step={0.1}
+                      value={audioSettings.fadeIn}
+                      onChange={(event) => updateAudioSetting('fadeIn', Number(event.target.value))}
+                      className="h-2 flex-1 cursor-pointer rounded-full bg-primary/30"
+                    />
+                    <input
+                      type="number"
+                      min={0}
+                      max={10}
+                      step={0.1}
+                      value={audioSettings.fadeIn}
+                      onChange={(event) => updateAudioSetting('fadeIn', Number(event.target.value))}
+                      className="w-20 rounded-md border border-border bg-background px-2 py-1 text-sm"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="audio-fade-out">Fade out (sec)</Label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      id="audio-fade-out"
+                      type="range"
+                      min={0}
+                      max={10}
+                      step={0.1}
+                      value={audioSettings.fadeOut}
+                      onChange={(event) => updateAudioSetting('fadeOut', Number(event.target.value))}
+                      className="h-2 flex-1 cursor-pointer rounded-full bg-primary/30"
+                    />
+                    <input
+                      type="number"
+                      min={0}
+                      max={10}
+                      step={0.1}
+                      value={audioSettings.fadeOut}
+                      onChange={(event) => updateAudioSetting('fadeOut', Number(event.target.value))}
+                      className="w-20 rounded-md border border-border bg-background px-2 py-1 text-sm"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-3 rounded-lg border border-border/70 bg-muted/10 p-4">
+                  <label className="flex items-center gap-3 text-sm font-medium text-foreground/90">
+                    <input
+                      type="checkbox"
+                      checked={audioSettings.loopTwice}
+                      onChange={(event) =>
+                        setAudioSettings((prev) => ({ ...prev, loopTwice: event.target.checked }))
+                      }
+                      className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                    />
+                    Loop video twice with continuous music
+                  </label>
+                  <p className="text-xs text-muted-foreground">
+                    Ensures the final render plays two seamless orbits while the uploaded track keeps
+                    playing without restarting.
+                  </p>
+                </div>
+
+                <Button
+                  size="sm"
+                  onClick={() =>
+                    onUpdateVideo({
+                      audioBlob: audioFile ?? undefined,
+                      audioSettings,
+                    })
+                  }
+                  disabled={isUpdating}
+                  className="gap-2 w-full"
+                >
+                  {isUpdating && <Loader2 className="h-4 w-4 animate-spin" />}
+                  {isUpdating ? 'Updating.' : 'Update Video'}
+                </Button>
+              </div>
+            ) : selectedSegment ? (
               (() => {
                 const curveValue =
                   selectedSegment.customBezier ??
@@ -220,7 +341,12 @@ export function FinalVideoEditor({
                   </label>
                   <Button
                     size="sm"
-                    onClick={() => onUpdateVideo(audioFile ?? undefined)}
+                    onClick={() =>
+                      onUpdateVideo({
+                        audioBlob: audioFile ?? undefined,
+                        audioSettings,
+                      })
+                    }
                     disabled={isUpdating}
                     className="gap-2 w-full mt-2"
                   >
@@ -261,3 +387,5 @@ export function FinalVideoEditor({
     </div>
   );
 }
+
+

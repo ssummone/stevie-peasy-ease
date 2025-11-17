@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type KeyboardEvent } from 'react';
 import { WaveformData } from '@/hooks/useAudioVisualization';
 import { Button } from '@/components/ui/button';
 import { Trash2 } from 'lucide-react';
@@ -13,6 +13,8 @@ interface AudioWaveformVisualizationProps {
   onRemove?: () => void;
   currentTime?: number;
   duration?: number;
+  onSelect?: () => void;
+  isSelected?: boolean;
 }
 
 export function AudioWaveformVisualization({
@@ -22,6 +24,8 @@ export function AudioWaveformVisualization({
   onRemove,
   currentTime = 0,
   duration = 0,
+  onSelect,
+  isSelected = false,
 }: AudioWaveformVisualizationProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -82,42 +86,53 @@ export function AudioWaveformVisualization({
     return null;
   }
 
+  const handleSelect = () => {
+    onSelect?.();
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!onSelect) return;
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      onSelect();
+    }
+  };
+
   return (
     <div className="w-full space-y-2">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm font-medium text-foreground">{fileName}</p>
-          {waveformData.duration && (
-            <p className="text-xs text-muted-foreground">
-              {formatTime(waveformData.duration)}
-            </p>
-          )}
-        </div>
+      <div
+        role={onSelect ? 'button' : undefined}
+        tabIndex={onSelect ? 0 : undefined}
+        onClick={handleSelect}
+        onKeyDown={handleKeyDown}
+        className={cn(
+          'relative rounded-lg border border-border bg-secondary/20 overflow-hidden transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+          onSelect && 'cursor-pointer',
+          isSelected && 'border-primary ring-2 ring-primary shadow-lg'
+        )}
+        aria-pressed={isSelected}
+      >
         {onRemove && (
           <Button
             type="button"
             variant="ghost"
             size="icon"
-            className="text-muted-foreground hover:text-foreground hover:bg-secondary/80"
-            onClick={onRemove}
+            className="absolute right-2 top-2 text-muted-foreground hover:text-foreground hover:bg-secondary/80"
+            onClick={(event) => {
+              event.stopPropagation();
+              onRemove();
+            }}
             disabled={isLoading}
           >
             <Trash2 className="h-4 w-4" />
           </Button>
         )}
-      </div>
-      <div className="rounded-lg border border-border bg-secondary/20 overflow-hidden">
         <canvas
           ref={canvasRef}
-          className="w-full h-[80px] bg-secondary/50"
+          className="h-[96px] w-full bg-secondary/50"
+          aria-label={`${fileName} waveform`}
         />
       </div>
     </div>
   );
-}
-
-function formatTime(seconds: number): string {
-  const mins = Math.floor(seconds / 60);
-  const secs = Math.floor(seconds % 60);
-  return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
