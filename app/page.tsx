@@ -434,7 +434,7 @@ export default function Home() {
             />
             {uploadedVideos.length === 0 && (
               <p className="max-w-lg text-lg text-muted-foreground">
-                Stitch and apply ease curves to short videos.
+                Free tool to stitch and apply ease curves to short videos.
               </p>
             )}
           </div>
