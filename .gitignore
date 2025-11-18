@@ -31,7 +31,7 @@ yarn-error.log*
 .pnpm-debug.log*
 
 # env files (can opt-in for committing if needed)
-.env*
+
 
 # vercel
 .vercel
@@ -39,3 +39,17 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+#agents stuff
+AGENTS.md
+CLAUDE.md   
+/.claude*
+/.agents*
+
+#docs
+/docs/*
+docs/PRD-and-implementation-plan.md
+docs/qwen-docs.md
+docs/kling-docs.md
+docs/mediabunny.md
+docs/seedream-lite.md
