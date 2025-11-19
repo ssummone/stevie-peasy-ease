@@ -429,7 +429,7 @@ function CubicBezierEditorComponent({
           <button
             type="button"
             aria-label="Adjust control point 1"
-            className={`absolute h-6 w-6 -translate-x-1/2 -translate-y-1/2 cursor-grab rounded-full border-2 border-background/80 bg-primary/80 shadow transition active:cursor-grabbing active:scale-95 disabled:cursor-not-allowed disabled:pointer-events-none ${
+            className={`absolute h-6 w-6 -translate-x-1/2 -translate-y-1/2 cursor-grab rounded-full border-2 border-background/80 bg-primary/80 shadow transition active:cursor-grabbing active:scale-95 disabled:cursor-not-allowed disabled:pointer-events-none touch-none ${
               draggingHandle === 'p1' ? 'ring-2 ring-primary/80' : ''
             }`}
             style={controlStyles.p1}
@@ -439,7 +439,7 @@ function CubicBezierEditorComponent({
           <button
             type="button"
             aria-label="Adjust control point 2"
-            className={`absolute h-6 w-6 -translate-x-1/2 -translate-y-1/2 cursor-grab rounded-full border-2 border-background/80 bg-primary/80 shadow transition active:cursor-grabbing active:scale-95 disabled:cursor-not-allowed disabled:pointer-events-none ${
+            className={`absolute h-6 w-6 -translate-x-1/2 -translate-y-1/2 cursor-grab rounded-full border-2 border-background/80 bg-primary/80 shadow transition active:cursor-grabbing active:scale-95 disabled:cursor-not-allowed disabled:pointer-events-none touch-none ${
               draggingHandle === 'p2' ? 'ring-2 ring-primary/80' : ''
             }`}
             style={controlStyles.p2}

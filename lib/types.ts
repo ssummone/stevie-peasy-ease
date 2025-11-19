@@ -2,6 +2,20 @@
  * Shared TypeScript types for the application
  */
 
+export type VideoEncodeCapabilityStatus =
+  | 'pending'
+  | 'checking'
+  | 'supported'
+  | 'unsupported'
+  | 'error';
+
+export interface VideoEncodeCapability {
+  status: VideoEncodeCapabilityStatus;
+  message?: string;
+  codecString?: string;
+  bitrate?: number;
+}
+
 export interface TransitionVideo {
   id: number;
   name: string;
@@ -14,6 +28,9 @@ export interface TransitionVideo {
   customBezier?: [number, number, number, number];
   loopIteration?: number;
   file?: File | Blob;
+  width?: number;
+  height?: number;
+  encodeCapability?: VideoEncodeCapability;
 }
 
 export interface AudioTrack {

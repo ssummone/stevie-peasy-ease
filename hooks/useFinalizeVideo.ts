@@ -97,9 +97,39 @@ export const useFinalizeVideo = (): UseFinalizeVideoReturn => {
             // Fetch video blob from URL or use cached file
             let videoBlob: Blob;
 
+            console.log(`[Debug] Processing video ${videoNumber}`, {
+              id: video.id,
+              hasFile: !!segmentMetadata.file,
+              fileName: segmentMetadata.file instanceof File ? segmentMetadata.file.name : 'not-a-file',
+              fileSize: segmentMetadata.file?.size,
+              url: video.url
+            });
+
+            // Helper to verify blob is readable
+            const verifyBlob = async (b: Blob, label: string) => {
+              try {
+                const slice = b.slice(0, 1024);
+                await slice.arrayBuffer();
+                console.log(`[Debug] ${label} is readable`);
+                return true;
+              } catch (e) {
+                console.error(`[Debug] ${label} is NOT readable`, e);
+                return false;
+              }
+            };
+
             if (segmentMetadata.file) {
-              videoBlob = segmentMetadata.file;
+              const isReadable = await verifyBlob(segmentMetadata.file, 'File');
+              if (isReadable) {
+                videoBlob = segmentMetadata.file;
+              } else {
+                console.warn(`[Debug] File exists but is not readable, falling back to fetch`);
+                const response = await fetch(video.url);
+                if (!response.ok) throw new Error(`Failed to fetch video (fallback): ${response.statusText}`);
+                videoBlob = await response.blob();
+              }
             } else {
+              console.warn(`[Debug] File missing for video ${videoNumber}, falling back to fetch`);
               const response = await fetch(video.url);
               if (!response.ok) {
                 throw new Error(`Failed to fetch video: ${response.statusText}`);

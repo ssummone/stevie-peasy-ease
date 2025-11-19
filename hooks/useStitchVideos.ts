@@ -12,11 +12,93 @@ import {
   BufferTarget,
   Mp4OutputFormat,
   getFirstEncodableAudioCodec,
+  canEncodeVideo,
 } from 'mediabunny';
-import {
-  DEFAULT_BITRATE,
-} from '@/lib/speed-curve-config';
-import { createAvcEncodingConfig } from '@/lib/video-encoding';
+import { DEFAULT_BITRATE } from '@/lib/speed-curve-config';
+import { createAvcEncodingConfig, AVC_LEVEL_4_0, AVC_LEVEL_5_1 } from '@/lib/video-encoding';
+
+const FALLBACK_WIDTH = 1920;
+const FALLBACK_HEIGHT = 1080;
+const BASELINE_PIXEL_LIMIT = 1920 * 1080;
+
+const ensureEvenDimension = (value: number): number => {
+  if (!Number.isFinite(value) || value <= 0) {
+    return 0;
+  }
+  const even = value % 2 === 0 ? value : value - 1;
+  return even > 0 ? even : 2;
+};
+
+const probeVideoMetadata = async (
+  blob: Blob
+): Promise<{ width: number; height: number; rotation: number }> => {
+  const source = new BlobSource(blob);
+  const input = new Input({
+    source,
+    formats: ALL_FORMATS,
+  });
+  try {
+    const videoTracks = await input.getVideoTracks();
+    if (videoTracks.length === 0) {
+      throw new Error('No video tracks found while probing dimensions.');
+    }
+    const track = videoTracks[0];
+    const widthCandidate =
+      (typeof track.displayWidth === 'number' && track.displayWidth > 0
+        ? track.displayWidth
+        : track.codedWidth) ?? FALLBACK_WIDTH;
+    const heightCandidate =
+      (typeof track.displayHeight === 'number' && track.displayHeight > 0
+        ? track.displayHeight
+        : track.codedHeight) ?? FALLBACK_HEIGHT;
+    return {
+      width: ensureEvenDimension(widthCandidate),
+      height: ensureEvenDimension(heightCandidate),
+      rotation: typeof track.rotation === 'number' ? track.rotation : 0,
+    };
+  } finally {
+    input.dispose();
+  }
+};
+
+const determineEncodeParameters = async (
+  blobs: Blob[]
+): Promise<{ width: number; height: number; rotation: number }> => {
+  let maxWidth = 0;
+  let maxHeight = 0;
+  let rotation: number | null = null;
+
+  for (let i = 0; i < blobs.length; i++) {
+    try {
+      const { width, height, rotation: trackRotation } = await probeVideoMetadata(blobs[i]);
+      maxWidth = Math.max(maxWidth, width);
+      maxHeight = Math.max(maxHeight, height);
+      if (rotation === null) {
+        rotation = trackRotation;
+      } else if (trackRotation !== rotation) {
+        console.warn(
+          `Rotation mismatch detected for video ${i + 1} (got ${trackRotation}, expected ${rotation}). Using the first rotation value.`
+        );
+      }
+    } catch (error) {
+      console.warn(`Failed to probe metadata for video ${i + 1}`, error);
+    }
+  }
+
+  if (maxWidth <= 0 || maxHeight <= 0) {
+    return {
+      width: FALLBACK_WIDTH,
+      height: FALLBACK_HEIGHT,
+      rotation: rotation ?? 0,
+    };
+  }
+
+  return {
+    width: ensureEvenDimension(maxWidth),
+    height: ensureEvenDimension(maxHeight),
+    rotation: rotation ?? 0,
+  };
+};
 
 interface StitchProgress {
   status: 'idle' | 'processing' | 'complete' | 'error';
@@ -94,11 +176,44 @@ export const useStitchVideos = (): UseStitchVideosReturn => {
           onProgress?.(p);
         };
 
+        updateProgress('processing', 'Analyzing video metadata...', 5);
+        const {
+          width: probedWidth,
+          height: probedHeight,
+          rotation: aggregateRotation,
+        } = await determineEncodeParameters(videoBlobs);
+        const safeWidth = probedWidth > 0 ? probedWidth : FALLBACK_WIDTH;
+        const safeHeight = probedHeight > 0 ? probedHeight : FALLBACK_HEIGHT;
+        const codecProfile =
+          safeWidth * safeHeight > BASELINE_PIXEL_LIMIT ? AVC_LEVEL_5_1 : AVC_LEVEL_4_0;
+        const resolvedBitrate = Math.max(bitrate, DEFAULT_BITRATE);
+
+        const supportsConfig = await canEncodeVideo('avc', {
+          width: safeWidth,
+          height: safeHeight,
+          bitrate: resolvedBitrate,
+          fullCodecString: codecProfile,
+        });
+
+        if (!supportsConfig) {
+          throw new Error(
+            `Device encoder cannot output ${safeWidth}x${safeHeight} using profile ${codecProfile}. Reduce the resolution or bitrate and try again.`
+          );
+        }
+
+        console.log('Stitch encoder configuration', {
+          width: safeWidth,
+          height: safeHeight,
+          codecProfile,
+          bitrate: resolvedBitrate,
+          rotation: aggregateRotation,
+        });
+
         // Create output once
-        updateProgress('processing', 'Creating output container...', 5);
+        updateProgress('processing', 'Creating output container...', 10);
 
         const videoSource = new VideoSampleSource(
-          createAvcEncodingConfig(bitrate)
+          createAvcEncodingConfig(resolvedBitrate, safeWidth, safeHeight, codecProfile)
         );
 
         const bufferTarget = new BufferTarget();
@@ -107,7 +222,7 @@ export const useStitchVideos = (): UseStitchVideosReturn => {
           target: bufferTarget,
         });
 
-        output.addVideoTrack(videoSource);
+        output.addVideoTrack(videoSource, { rotation: aggregateRotation });
 
         // Add audio track if provided
         let audioSource: AudioBufferSource | undefined;
@@ -156,14 +271,14 @@ export const useStitchVideos = (): UseStitchVideosReturn => {
             videoNumber
           );
 
-          try {
-            // Create input for this video
-            const blobSource = new BlobSource(videoBlob);
-            const input = new Input({
-              source: blobSource,
-              formats: ALL_FORMATS,
-            });
+          // Create input for this video
+          const blobSource = new BlobSource(videoBlob);
+          const input = new Input({
+            source: blobSource,
+            formats: ALL_FORMATS,
+          });
 
+          try {
             const videoTracks = await input.getVideoTracks();
             if (videoTracks.length === 0) {
               console.warn(`No video tracks in video ${videoNumber}`);
@@ -194,8 +309,7 @@ export const useStitchVideos = (): UseStitchVideosReturn => {
               if (samplesFromThisVideo % 10 === 0) {
                 const videoProgress = samplesFromThisVideo / 300; // Rough estimate
                 const overallProgress =
-                  5 +
-                  ((videoIndex + videoProgress) / videoBlobs.length) * 90;
+                  5 + ((videoIndex + videoProgress) / videoBlobs.length) * 90;
                 updateProgress(
                   'processing',
                   `Processing video ${videoNumber}/${videoBlobs.length}: ${samplesFromThisVideo} frames...`,
@@ -208,11 +322,14 @@ export const useStitchVideos = (): UseStitchVideosReturn => {
             // Update the current output time for next video
             currentOutputTime += videoDuration;
           } catch (videoError) {
-            const errorMsg = videoError instanceof Error
-              ? videoError.message
-              : `Failed to process video ${videoNumber}`;
+            const errorMsg =
+              videoError instanceof Error
+                ? videoError.message
+                : `Failed to process video ${videoNumber}`;
             console.error(`Error processing video ${videoNumber}:`, videoError);
             throw new Error(errorMsg);
+          } finally {
+            input.dispose();
           }
         }
 
@@ -245,20 +362,21 @@ export const useStitchVideos = (): UseStitchVideosReturn => {
 
         return outputBlob;
       } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        console.error('Video stitching error:', error);
+        const normalizedError =
+          error instanceof Error ? error : new Error(String(error));
+        console.error('Video stitching error:', normalizedError);
 
         const errorProgress: StitchProgress = {
           status: 'error',
-          message: `Error: ${errorMessage}`,
+          message: `Error: ${normalizedError.message}`,
           progress: 0,
-          error: errorMessage,
+          error: normalizedError.message,
         };
 
         setProgress(errorProgress);
         onProgress?.(errorProgress);
 
-        return null;
+        throw normalizedError;
       }
     },
     []

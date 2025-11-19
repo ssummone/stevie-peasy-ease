@@ -53,3 +53,9 @@ docs/qwen-docs.md
 docs/kling-docs.md
 docs/mediabunny.md
 docs/seedream-lite.md
+
+#cloudflared
+cloudflared-config.yml
+tunnel_list.txt
+quick_tunnel.log
+cloudflared.exe

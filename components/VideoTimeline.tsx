@@ -106,13 +106,13 @@ export function TimelineZoomSlider({ value, onValueChange, disabled }: ZoomSlide
     <div
       ref={sliderRef}
       className={cn(
-        'relative h-8 w-[100px] cursor-pointer select-none touch-none',
+        'relative h-8 w-[70px] md:w-[100px] cursor-pointer select-none touch-none',
         disabled && 'cursor-not-allowed opacity-50'
       )}
       onMouseDown={handleMouseDown}
       onTouchStart={handleTouchStart}
     >
-      <div className="absolute left-0 right-0 top-1/2 h-1 -translate-y-1/2 rounded-full bg-border/60" />
+      <div className="absolute left-0 right-0 top-1/2 h-1 -translate-y-1/2 rounded-full bg-muted-foreground/30" />
       <div
         className="absolute top-1/2 h-5 w-5 -translate-y-1/2 -translate-x-1/2 rounded-full border border-primary/40 bg-primary shadow-lg transition-transform touch-none"
         style={{ left: `${value * 100}%` }}
@@ -242,8 +242,11 @@ export function VideoTimeline({
     };
   }, [segments]);
 
-  // Handle click on timeline to seek
-  const handleTimelineClick = (e: React.MouseEvent<HTMLDivElement>) => {
+  // Handle timeline interaction (click or drag)
+  const handleTrackPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    // Prevent default to stop scrolling/selection
+    e.preventDefault();
+    
     if (!viewportRef.current) return;
 
     const rect = viewportRef.current.getBoundingClientRect();
@@ -252,19 +255,35 @@ export function VideoTimeline({
     const clampedTime = clamp(newTime, 0, totalDuration);
 
     onSeek(clampedTime);
+    setIsDragging(true);
+    
+    // Capture pointer to ensure we get move events even if we leave the element
+    const target = e.target as HTMLElement;
+    if (target.setPointerCapture) {
+      target.setPointerCapture(e.pointerId);
+    }
   };
 
-  // Handle playhead dragging
-  const handlePlayheadMouseDown = (e: React.MouseEvent) => {
+  // Handle playhead dragging (specific target)
+  const handlePlayheadPointerDown = (e: React.PointerEvent) => {
     e.stopPropagation();
+    e.preventDefault(); // Prevent touch scroll
     setIsDragging(true);
+    
+    const target = e.target as HTMLElement;
+    if (target.setPointerCapture) {
+      target.setPointerCapture(e.pointerId);
+    }
   };
 
   useEffect(() => {
     if (!isDragging) return;
 
-    const handleMouseMove = (e: MouseEvent) => {
+    const handlePointerMove = (e: PointerEvent) => {
       if (!viewportRef.current) return;
+
+      // Prevent scrolling on touch devices while dragging
+      e.preventDefault();
 
       const rect = viewportRef.current.getBoundingClientRect();
       const mouseX = e.clientX - rect.left + viewportRef.current.scrollLeft;
@@ -274,16 +293,18 @@ export function VideoTimeline({
       onSeek(clampedTime);
     };
 
-    const handleMouseUp = () => {
+    const handlePointerUp = () => {
       setIsDragging(false);
     };
 
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener('pointermove', handlePointerMove, { passive: false });
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerUp);
 
     return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerUp);
     };
   }, [isDragging, pixelsPerSecond, totalDuration, onSeek]);
 
@@ -332,9 +353,9 @@ export function VideoTimeline({
           className="timeline-scrollbar w-full max-w-full min-w-0 overflow-x-auto rounded-lg border border-border bg-secondary/30"
           onWheel={handleTimelineWheel}
         >
-          <div className="relative space-y-4" style={{ width: `${trackWidth}px` }}>
+          <div className="relative space-y-1 md:space-y-4" style={{ width: `${trackWidth}px` }}>
             {/* Time Ruler */}
-            <div className="relative h-8 border-b border-border/60 bg-background/40">
+            <div className="relative h-5 md:h-8 border-b border-border/60 bg-background/40">
               {Array.from({ length: tickCount }, (_, index) => {
                 const tickPosition = timeToPixels(index, pixelsPerSecond);
                 return (
@@ -343,7 +364,7 @@ export function VideoTimeline({
                     className="absolute flex -translate-x-1/2 flex-col items-center text-[10px] font-medium text-muted-foreground tabular-nums"
                     style={{ left: `${tickPosition}px` }}
                   >
-                    <div className="h-2 w-px bg-border" />
+                    <div className="h-1 md:h-2 w-px bg-border" />
                     <span>{index}s</span>
                   </div>
                 );
@@ -352,8 +373,8 @@ export function VideoTimeline({
 
             {/* Timeline Track */}
             <div
-              className="relative h-24 cursor-pointer select-none"
-              onClick={handleTimelineClick}
+              className="relative h-14 md:h-24 cursor-pointer select-none touch-none"
+              onPointerDown={handleTrackPointerDown}
             >
               <div className="flex h-full">
                 {boundaries.map((boundary) => {
@@ -375,6 +396,8 @@ export function VideoTimeline({
                       onClick={(e) => {
                         e.stopPropagation();
                         onSegmentSelect(boundary.segment.id);
+                        // Also seek to start of segment to prevent playback loop from resetting selection
+                        onSeek(boundary.startTime); 
                       }}
                     >
                       {/* Thumbnail */}
@@ -390,8 +413,8 @@ export function VideoTimeline({
                       <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
 
                       {/* Segment Name */}
-                      <div className="absolute bottom-0 left-0 right-0 p-2">
-                        <p className="text-xs font-medium text-white truncate">
+                      <div className="absolute bottom-0 left-0 right-0 p-1 md:p-2">
+                        <p className="text-[10px] md:text-xs font-medium text-white truncate">
                           {boundary.segment.loopIteration && boundary.segment.loopIteration > 1
                             ? `${boundary.segment.name} • Loop ${boundary.segment.loopIteration}`
                             : boundary.segment.name}
@@ -408,15 +431,15 @@ export function VideoTimeline({
                 style={{ left: `${playheadPosition}px` }}
               >
                 <div
-                  className="pointer-events-auto absolute top-0 left-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-background bg-primary shadow-lg cursor-grab active:cursor-grabbing"
-                  onMouseDown={handlePlayheadMouseDown}
+                  className="pointer-events-auto absolute top-0 left-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-background bg-primary shadow-lg cursor-grab active:cursor-grabbing touch-none"
+                  onPointerDown={handlePlayheadPointerDown}
                 />
                 <div className="absolute inset-0 -left-px w-1 bg-primary/30 blur-sm -z-10" />
               </div>
             </div>
 
             {renderAudioTrack && (
-              <div className="pb-4">
+              <div className="pb-2 md:pb-4">
                 {renderAudioTrack({
                   trackWidth,
                   pixelsPerSecond,

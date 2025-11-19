@@ -62,8 +62,8 @@ const getVideoDimensions = (blob: Blob): Promise<{ width: number; height: number
       URL.revokeObjectURL(video.src);
     };
     video.onerror = () => {
-       reject(new Error('Failed to load video metadata'));
-       URL.revokeObjectURL(video.src);
+      reject(new Error('Failed to load video metadata'));
+      URL.revokeObjectURL(video.src);
     };
     video.src = URL.createObjectURL(blob);
   });
@@ -112,6 +112,14 @@ export const useApplySpeedCurve = (): UseApplySpeedCurveReturn => {
 
         updateProgress('processing', 'Creating input from video blob...', 5);
 
+        console.log('[Debug] applySpeedCurve input:', {
+          isBlob: videoBlob instanceof Blob,
+          isFile: videoBlob instanceof File,
+          size: videoBlob.size,
+          type: videoBlob.type,
+          name: videoBlob instanceof File ? videoBlob.name : 'anonymous-blob'
+        });
+
         // Step 1: Create input from blob
         const blobSource = new BlobSource(videoBlob);
         const input = new Input({
@@ -125,6 +133,8 @@ export const useApplySpeedCurve = (): UseApplySpeedCurveReturn => {
         }
 
         const videoTrack = videoTracks[0];
+        const trackRotation =
+          typeof videoTrack.rotation === 'number' ? videoTrack.rotation : 0;
 
         // Step 2: Create sink to read samples
         updateProgress('processing', 'Creating video sample sink...', 10);
@@ -142,8 +152,8 @@ export const useApplySpeedCurve = (): UseApplySpeedCurveReturn => {
               return null;
             }),
           getVideoDimensions(videoBlob).catch((e) => {
-             console.warn('Failed to get video dimensions', e);
-             return { width: 1920, height: 1080 }; // Fallback
+            console.warn('Failed to get video dimensions', e);
+            return { width: 1920, height: 1080 }; // Fallback
           })
         ]);
 
@@ -203,7 +213,7 @@ export const useApplySpeedCurve = (): UseApplySpeedCurveReturn => {
         // Determine best supported resolution/bitrate
         const sourceWidth = dimensions.width;
         const sourceHeight = dimensions.height;
-        
+
         // Helper to check support
         const checkSupport = async (config: VideoEncoderConfig) => {
           try {
@@ -244,16 +254,16 @@ export const useApplySpeedCurve = (): UseApplySpeedCurveReturn => {
         ];
 
         let selectedConfig = tiers[tiers.length - 1]; // Default to lowest
-        
+
         for (const tier of tiers) {
           // Maintain aspect ratio if downscaling
           let targetWidth = tier.width;
           let targetHeight = tier.height;
-          
+
           if (targetWidth < sourceWidth || targetHeight < sourceHeight) {
-             const scale = Math.min(tier.width / sourceWidth, tier.height / sourceHeight);
-             targetWidth = Math.round(sourceWidth * scale) & ~1; // Ensure even dimensions
-             targetHeight = Math.round(sourceHeight * scale) & ~1;
+            const scale = Math.min(tier.width / sourceWidth, tier.height / sourceHeight);
+            targetWidth = Math.round(sourceWidth * scale) & ~1; // Ensure even dimensions
+            targetHeight = Math.round(sourceHeight * scale) & ~1;
           }
 
           const config: VideoEncoderConfig = {
@@ -287,7 +297,7 @@ export const useApplySpeedCurve = (): UseApplySpeedCurveReturn => {
           target: bufferTarget,
         });
 
-        output.addVideoTrack(videoSource);
+        output.addVideoTrack(videoSource, { rotation: trackRotation });
 
         updateProgress('processing', 'Starting output encoding...', 25);
 
