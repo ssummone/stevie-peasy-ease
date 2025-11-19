@@ -100,6 +100,7 @@ export const useFinalizeVideo = (): UseFinalizeVideoReturn => {
             console.log(`[Debug] Processing video ${videoNumber}`, {
               id: video.id,
               hasFile: !!segmentMetadata.file,
+              hasCachedBlob: !!segmentMetadata.cachedBlob,
               fileName: segmentMetadata.file instanceof File ? segmentMetadata.file.name : 'not-a-file',
               fileSize: segmentMetadata.file?.size,
               url: video.url
@@ -118,18 +119,27 @@ export const useFinalizeVideo = (): UseFinalizeVideoReturn => {
               }
             };
 
-            if (segmentMetadata.file) {
-              const isReadable = await verifyBlob(segmentMetadata.file, 'File');
-              if (isReadable) {
-                videoBlob = segmentMetadata.file;
-              } else {
-                console.warn(`[Debug] File exists but is not readable, falling back to fetch`);
-                const response = await fetch(video.url);
-                if (!response.ok) throw new Error(`Failed to fetch video (fallback): ${response.statusText}`);
-                videoBlob = await response.blob();
+            const tryGetReadableBlob = async (): Promise<Blob | null> => {
+              const candidates: Array<{ blob?: Blob; label: string }> = [
+                { blob: segmentMetadata.cachedBlob, label: 'Cached blob' },
+                { blob: segmentMetadata.file, label: 'File' },
+              ];
+              for (const candidate of candidates) {
+                if (!candidate.blob) continue;
+                const readable = await verifyBlob(candidate.blob, candidate.label);
+                if (readable) {
+                  return candidate.blob;
+                }
               }
+              return null;
+            };
+
+            const readableSource = await tryGetReadableBlob();
+
+            if (readableSource) {
+              videoBlob = readableSource;
             } else {
-              console.warn(`[Debug] File missing for video ${videoNumber}, falling back to fetch`);
+              console.warn(`[Debug] No readable blob for video ${videoNumber}, falling back to fetch`);
               const response = await fetch(video.url);
               if (!response.ok) {
                 throw new Error(`Failed to fetch video: ${response.statusText}`);

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Upload, Play, PlayCircle, GripVertical, Trash2, ChevronUp, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -91,6 +91,30 @@ const estimateBitrateForResolution = (width: number, height: number) => {
 const formatResolutionLabel = (width?: number, height?: number) =>
   width && height ? `${width}x${height}` : 'this resolution';
 
+const cloneSegmentForLoop = (
+  segment: TransitionVideo,
+  newId: number,
+  loopIteration: number
+): TransitionVideo => {
+  const clonedBezier = segment.customBezier
+    ? [...segment.customBezier] as [number, number, number, number]
+    : undefined;
+  let clonedUrl = segment.url;
+  if (segment.cachedBlob) {
+    clonedUrl = URL.createObjectURL(segment.cachedBlob);
+  } else if (segment.file instanceof Blob) {
+    clonedUrl = URL.createObjectURL(segment.file);
+  }
+
+  return {
+    ...segment,
+    id: newId,
+    loopIteration,
+    customBezier: clonedBezier,
+    url: clonedUrl,
+  };
+};
+
 const ensureLoopIterations = (segments: TransitionVideo[]): TransitionVideo[] =>
   segments.map((segment) =>
     segment.loopIteration
@@ -134,15 +158,9 @@ const syncSegmentsToLoopCount = (
     );
     const segmentsToClone = sourceSegments.length > 0 ? sourceSegments : fallbackSegments;
 
-    const clonedSegments = segmentsToClone.map((segment) => ({
-      ...segment,
-      id: nextId++,
-      loopIteration: loopCursor + 1,
-      customBezier: segment.customBezier
-        ? [...segment.customBezier] as [number, number, number, number]
-        : undefined,
-      file: segment.file, // Explicitly preserve file
-    }));
+    const clonedSegments = segmentsToClone.map((segment) =>
+      cloneSegmentForLoop(segment, nextId++, loopCursor + 1)
+    );
 
     updatedSegments = [...updatedSegments, ...clonedSegments];
     loopCursor += 1;
@@ -165,6 +183,7 @@ export default function Home() {
   const [isDropZoneHovered, setIsDropZoneHovered] = useState(false);
   const [isSupported, setIsSupported] = useState(true);
   const [isCheckingSupport, setIsCheckingSupport] = useState(true);
+  const transitionVideosRef = useRef<TransitionVideo[]>([]);
 
   useEffect(() => {
     const checkSupport = async () => {
@@ -187,11 +206,34 @@ export default function Home() {
 
   const { finalizeVideos } = useFinalizeVideo();
 
+  const cleanupSegmentResources = useCallback((segments: TransitionVideo[]) => {
+    segments.forEach((segment) => {
+      if (segment.url) {
+        try {
+          URL.revokeObjectURL(segment.url);
+        } catch {
+          // Ignore double-revoke errors
+        }
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    transitionVideosRef.current = transitionVideos;
+  }, [transitionVideos]);
+
+  useEffect(() => {
+    return () => {
+      cleanupSegmentResources(transitionVideosRef.current);
+    };
+  }, [cleanupSegmentResources]);
+
   const evaluateVideoEncodeCapability = useCallback(
     async (segments: TransitionVideo[]) => {
       await Promise.all(
         segments.map(async (segment) => {
-          if (!segment.file) {
+          const blobSource = segment.cachedBlob ?? segment.file;
+          if (!blobSource) {
             return;
           }
           const segmentId = segment.id;
@@ -214,7 +256,7 @@ export default function Home() {
           });
 
           try {
-            const metadata = await readVideoMetadata(segment.file);
+            const metadata = await readVideoMetadata(blobSource);
             const codecString = getCodecStringForResolution(metadata.width, metadata.height);
             const bitrate = estimateBitrateForResolution(metadata.width, metadata.height);
             const supported = await canEncodeVideo('avc', {
@@ -272,38 +314,60 @@ export default function Home() {
     [setTransitionVideos]
   );
 
-  const handleVideosUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (files && files[0]) {
-      const videoFiles = Array.from(files).filter((f) =>
-        f.type.startsWith('video/')
-      );
+  const handleVideosUpload = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = e.target.files;
+      if (!(files && files[0])) {
+        return;
+      }
+
+      const videoFiles = Array.from(files).filter((f) => f.type.startsWith('video/'));
       setUploadedVideos(videoFiles);
 
-      // Convert uploaded files to TransitionVideo format
-      const transitionVideos = videoFiles.map((file, index) => ({
-        id: index + 1,
-        name: file.name,
-        url: URL.createObjectURL(file),
-        loading: false,
-        duration: 1.5,
-        easingPreset: DEFAULT_EASING,
-        useCustomEasing: false,
-        customBezier: getPresetBezier(DEFAULT_EASING),
-        loopIteration: 1,
-        file: file,
-        encodeCapability: {
-          status: 'checking',
-          message: 'Checking device encoder support…',
-        },
-      }));
-      setTransitionVideos(transitionVideos);
-      setLoopCount(1);
-      setSelectedSegmentId(transitionVideos[0]?.id ?? null);
-      void evaluateVideoEncodeCapability(transitionVideos);
-    }
-  };
+      try {
+        const preparedSegments = await Promise.all(
+          videoFiles.map(async (file, index) => {
+            const buffer = await file.arrayBuffer();
+            const cachedBlob = new Blob([buffer], { type: file.type || 'video/mp4' });
+            const objectUrl = URL.createObjectURL(cachedBlob);
 
+            return {
+              id: index + 1,
+              name: file.name,
+              url: objectUrl,
+              loading: false,
+              duration: 1.5,
+              easingPreset: DEFAULT_EASING,
+              useCustomEasing: false,
+              customBezier: getPresetBezier(DEFAULT_EASING),
+              loopIteration: 1,
+              file,
+              cachedBlob,
+              encodeCapability: {
+                status: 'checking',
+                message: 'Checking device encoder support...',
+              },
+            } as TransitionVideo;
+          })
+        );
+
+        setTransitionVideos((prev) => {
+          cleanupSegmentResources(prev);
+          return preparedSegments;
+        });
+        setLoopCount(1);
+        setSelectedSegmentId(preparedSegments[0]?.id ?? null);
+        void evaluateVideoEncodeCapability(preparedSegments);
+      } catch (error) {
+        console.error('Failed to process uploaded videos', error);
+      } finally {
+        if (e.target) {
+          e.target.value = '';
+        }
+      }
+    },
+    [cleanupSegmentResources, evaluateVideoEncodeCapability]
+  );
   const handleSelectSegment = (id: number) => {
     setSelectedSegmentId(id);
   };
@@ -314,6 +378,11 @@ export default function Home() {
     }
     setTransitionVideos((prev) => {
       const nextSegments = syncSegmentsToLoopCount(prev, nextLoop);
+      const nextIds = new Set(nextSegments.map((segment) => segment.id));
+      const removed = prev.filter((segment) => !nextIds.has(segment.id));
+      if (removed.length > 0) {
+        cleanupSegmentResources(removed);
+      }
       if (nextSegments.length === 0) {
         setSelectedSegmentId(null);
       } else if (
@@ -602,7 +671,10 @@ export default function Home() {
               isUpdating={isFinalizingVideo}
               onExit={() => {
                 setFinalVideo(null);
-                setTransitionVideos([]);
+                setTransitionVideos((prev) => {
+                  cleanupSegmentResources(prev);
+                  return [];
+                });
                 setUploadedVideos([]);
                 setSelectedSegmentId(null);
                 setLoopCount(1);
@@ -669,7 +741,9 @@ export default function Home() {
                   <input
                     type="file"
                     accept="video/*"
-                    onChange={handleVideosUpload}
+                    onChange={(event) => {
+                      void handleVideosUpload(event);
+                    }}
                     className="hidden"
                     id="videos-input"
                     multiple
@@ -726,7 +800,10 @@ export default function Home() {
                       size="sm"
                       onClick={() => {
                         setUploadedVideos([]);
-                        setTransitionVideos([]);
+                        setTransitionVideos((prev) => {
+                          cleanupSegmentResources(prev);
+                          return [];
+                        });
                         setFinalVideo(null);
                         setSelectedSegmentId(null);
                       }}
@@ -867,7 +944,13 @@ export default function Home() {
                               size="icon"
                               className="text-muted-foreground hover:text-foreground hover:bg-secondary/80"
                               onClick={() => {
-                                setTransitionVideos((prev) => prev.filter((v) => v.id !== video.id));
+                                setTransitionVideos((prev) => {
+                                  const target = prev.find((v) => v.id === video.id);
+                                  if (target) {
+                                    cleanupSegmentResources([target]);
+                                  }
+                                  return prev.filter((v) => v.id !== video.id);
+                                });
                                 setUploadedVideos((prev) => prev.filter((f) => f.name !== video.name));
                               }}
                             >

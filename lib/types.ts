@@ -28,6 +28,7 @@ export interface TransitionVideo {
   customBezier?: [number, number, number, number];
   loopIteration?: number;
   file?: File | Blob;
+  cachedBlob?: Blob;
   width?: number;
   height?: number;
   encodeCapability?: VideoEncodeCapability;

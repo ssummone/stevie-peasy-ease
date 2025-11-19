@@ -12,6 +12,7 @@ import {
   BufferTarget,
   Mp4OutputFormat,
 } from 'mediabunny';
+import type { Rotation } from 'mediabunny';
 import {
   warpTime,
   calculateWarpedDuration,
@@ -67,6 +68,10 @@ const getVideoDimensions = (blob: Blob): Promise<{ width: number; height: number
     };
     video.src = URL.createObjectURL(blob);
   });
+};
+
+const normalizeRotation = (value: unknown): Rotation => {
+  return value === 0 || value === 90 || value === 180 || value === 270 ? value : 0;
 };
 
 /**
@@ -133,8 +138,9 @@ export const useApplySpeedCurve = (): UseApplySpeedCurveReturn => {
         }
 
         const videoTrack = videoTracks[0];
-        const trackRotation =
-          typeof videoTrack.rotation === 'number' ? videoTrack.rotation : 0;
+        const trackRotation = normalizeRotation(
+          typeof videoTrack.rotation === 'number' ? videoTrack.rotation : undefined
+        );
 
         // Step 2: Create sink to read samples
         updateProgress('processing', 'Creating video sample sink...', 10);

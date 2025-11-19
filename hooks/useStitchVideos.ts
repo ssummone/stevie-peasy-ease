@@ -14,6 +14,7 @@ import {
   getFirstEncodableAudioCodec,
   canEncodeVideo,
 } from 'mediabunny';
+import type { Rotation } from 'mediabunny';
 import { DEFAULT_BITRATE } from '@/lib/speed-curve-config';
 import { createAvcEncodingConfig, AVC_LEVEL_4_0, AVC_LEVEL_5_1 } from '@/lib/video-encoding';
 
@@ -29,9 +30,13 @@ const ensureEvenDimension = (value: number): number => {
   return even > 0 ? even : 2;
 };
 
+const normalizeRotation = (value: unknown): Rotation => {
+  return value === 0 || value === 90 || value === 180 || value === 270 ? value : 0;
+};
+
 const probeVideoMetadata = async (
   blob: Blob
-): Promise<{ width: number; height: number; rotation: number }> => {
+): Promise<{ width: number; height: number; rotation: Rotation }> => {
   const source = new BlobSource(blob);
   const input = new Input({
     source,
@@ -54,7 +59,7 @@ const probeVideoMetadata = async (
     return {
       width: ensureEvenDimension(widthCandidate),
       height: ensureEvenDimension(heightCandidate),
-      rotation: typeof track.rotation === 'number' ? track.rotation : 0,
+      rotation: normalizeRotation(track.rotation),
     };
   } finally {
     input.dispose();
@@ -63,10 +68,10 @@ const probeVideoMetadata = async (
 
 const determineEncodeParameters = async (
   blobs: Blob[]
-): Promise<{ width: number; height: number; rotation: number }> => {
+): Promise<{ width: number; height: number; rotation: Rotation }> => {
   let maxWidth = 0;
   let maxHeight = 0;
-  let rotation: number | null = null;
+  let rotation: Rotation | null = null;
 
   for (let i = 0; i < blobs.length; i++) {
     try {
@@ -89,14 +94,14 @@ const determineEncodeParameters = async (
     return {
       width: FALLBACK_WIDTH,
       height: FALLBACK_HEIGHT,
-      rotation: rotation ?? 0,
+      rotation: rotation ?? (0 as Rotation),
     };
   }
 
   return {
     width: ensureEvenDimension(maxWidth),
     height: ensureEvenDimension(maxHeight),
-    rotation: rotation ?? 0,
+    rotation: rotation ?? (0 as Rotation),
   };
 };
 
