@@ -268,7 +268,7 @@ export const useApplySpeedCurve = (): UseApplySpeedCurveReturn => {
         // Scan for actual duration using the blob (safer than reusing track)
         const { firstTimestamp: scannedFirstT, duration: scannedDuration, packetCount } = await scanActualDuration(videoBlob);
         
-        let effectiveInputDuration = 
+        const effectiveInputDuration =
           scannedDuration > 0 ? scannedDuration :
           (typeof metadata.duration === 'number' && Number.isFinite(metadata.duration) && metadata.duration > 0
             ? metadata.duration
@@ -310,9 +310,9 @@ export const useApplySpeedCurve = (): UseApplySpeedCurveReturn => {
           label: string;
         };
 
-        // Define fallback tiers
+        // Define fallback tiers - preserve source bitrate at each tier for quality
         const tiers: VideoTier[] = [
-          // Tier 1: Original Resolution (if 4K or high bitrate)
+          // Tier 1: Original Resolution with High profile 5.1
           {
             width: sourceWidth,
             height: sourceHeight,
@@ -320,20 +320,20 @@ export const useApplySpeedCurve = (): UseApplySpeedCurveReturn => {
             codec: AVC_LEVEL_5_1,
             label: 'Original'
           },
-          // Tier 2: 1080p (Max 15Mbps)
+          // Tier 2: 1080p with High profile 4.0 - preserve source bitrate
           {
             width: Math.min(sourceWidth, 1920),
             height: Math.min(sourceHeight, 1080),
-            bitrate: Math.min(resolvedBitrate, 15_000_000),
+            bitrate: resolvedBitrate, // No cap - preserve source quality
             codec: AVC_LEVEL_4_0,
             label: '1080p'
           },
-          // Tier 3: 720p (Max 5Mbps)
+          // Tier 3: 720p with High profile 4.0 - preserve source bitrate
           {
             width: Math.min(sourceWidth, 1280),
             height: Math.min(sourceHeight, 720),
-            bitrate: Math.min(resolvedBitrate, 5_000_000),
-            codec: 'avc1.42001f', // Level 3.1
+            bitrate: resolvedBitrate, // No cap - preserve source quality
+            codec: AVC_LEVEL_4_0,
             label: '720p'
           }
         ];

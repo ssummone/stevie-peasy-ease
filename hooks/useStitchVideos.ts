@@ -36,7 +36,7 @@ const normalizeRotation = (value: unknown): Rotation => {
 
 const probeVideoMetadata = async (
   blob: Blob
-): Promise<{ width: number; height: number; rotation: Rotation }> => {
+): Promise<{ width: number; height: number; rotation: Rotation; bitrate: number }> => {
   const source = new BlobSource(blob);
   const input = new Input({
     source,
@@ -56,10 +56,23 @@ const probeVideoMetadata = async (
       (typeof track.displayHeight === 'number' && track.displayHeight > 0
         ? track.displayHeight
         : track.codedHeight) ?? FALLBACK_HEIGHT;
+
+    // Probe bitrate from packet stats
+    let bitrate = 0;
+    try {
+      const packetStats = await track.computePacketStats();
+      if (packetStats?.averageBitrate && Number.isFinite(packetStats.averageBitrate)) {
+        bitrate = packetStats.averageBitrate;
+      }
+    } catch (e) {
+      console.warn('Failed to compute packet stats for bitrate', e);
+    }
+
     return {
       width: ensureEvenDimension(widthCandidate),
       height: ensureEvenDimension(heightCandidate),
       rotation: normalizeRotation(track.rotation),
+      bitrate,
     };
   } finally {
     input.dispose();
@@ -68,16 +81,18 @@ const probeVideoMetadata = async (
 
 const determineEncodeParameters = async (
   blobs: Blob[]
-): Promise<{ width: number; height: number; rotation: Rotation }> => {
+): Promise<{ width: number; height: number; rotation: Rotation; maxSourceBitrate: number }> => {
   let maxWidth = 0;
   let maxHeight = 0;
+  let maxSourceBitrate = 0;
   let rotation: Rotation | null = null;
 
   for (let i = 0; i < blobs.length; i++) {
     try {
-      const { width, height, rotation: trackRotation } = await probeVideoMetadata(blobs[i]);
+      const { width, height, rotation: trackRotation, bitrate } = await probeVideoMetadata(blobs[i]);
       maxWidth = Math.max(maxWidth, width);
       maxHeight = Math.max(maxHeight, height);
+      maxSourceBitrate = Math.max(maxSourceBitrate, bitrate);
       if (rotation === null) {
         rotation = trackRotation;
       } else if (trackRotation !== rotation) {
@@ -95,6 +110,7 @@ const determineEncodeParameters = async (
       width: FALLBACK_WIDTH,
       height: FALLBACK_HEIGHT,
       rotation: rotation ?? (0 as Rotation),
+      maxSourceBitrate,
     };
   }
 
@@ -102,6 +118,7 @@ const determineEncodeParameters = async (
     width: ensureEvenDimension(maxWidth),
     height: ensureEvenDimension(maxHeight),
     rotation: rotation ?? (0 as Rotation),
+    maxSourceBitrate,
   };
 };
 
@@ -186,12 +203,20 @@ export const useStitchVideos = (): UseStitchVideosReturn => {
           width: probedWidth,
           height: probedHeight,
           rotation: aggregateRotation,
+          maxSourceBitrate,
         } = await determineEncodeParameters(videoBlobs);
         const safeWidth = probedWidth > 0 ? probedWidth : FALLBACK_WIDTH;
         const safeHeight = probedHeight > 0 ? probedHeight : FALLBACK_HEIGHT;
         const codecProfile =
           safeWidth * safeHeight > BASELINE_PIXEL_LIMIT ? AVC_LEVEL_5_1 : AVC_LEVEL_4_0;
-        const resolvedBitrate = Math.max(bitrate, DEFAULT_BITRATE);
+        // Use the highest of: passed bitrate, default bitrate, or max source bitrate
+        // Ensure it's a positive integer (required by encoder)
+        const candidateBitrate = Math.max(
+          Number.isFinite(bitrate) && bitrate > 0 ? bitrate : 0,
+          DEFAULT_BITRATE,
+          Number.isFinite(maxSourceBitrate) && maxSourceBitrate > 0 ? maxSourceBitrate : 0
+        );
+        const resolvedBitrate = Math.max(1, Math.floor(candidateBitrate));
 
         const supportsConfig = await canEncodeVideo('avc', {
           width: safeWidth,
@@ -211,6 +236,8 @@ export const useStitchVideos = (): UseStitchVideosReturn => {
           height: safeHeight,
           codecProfile,
           bitrate: resolvedBitrate,
+          maxSourceBitrate,
+          requestedBitrate: bitrate,
           rotation: aggregateRotation,
         });
 
@@ -261,8 +288,8 @@ export const useStitchVideos = (): UseStitchVideosReturn => {
 
         await output.start();
 
-        // Track cumulative time for proper sequencing
-        let currentOutputTime = 0;
+        // Track the highest timestamp we've written to ensure monotonicity
+        let highestWrittenTimestamp = 0;
 
         // Process each video blob
         for (let videoIndex = 0; videoIndex < videoBlobs.length; videoIndex++) {
@@ -296,18 +323,39 @@ export const useStitchVideos = (): UseStitchVideosReturn => {
             // Get duration of this video
             const videoDuration = await input.computeDuration();
 
+            // Track the base offset for this video segment
+            const segmentBaseTime = highestWrittenTimestamp;
+            // Track minimum timestamp in this segment to normalize
+            let segmentMinTimestamp: number | null = null;
+
             // Read and write samples from this video
             let samplesFromThisVideo = 0;
             for await (const sample of sink.samples(0, videoDuration)) {
               const originalTimestamp = sample.timestamp ?? 0;
+              const originalDuration = sample.duration ?? 0;
 
-              // Adjust timestamps to fit after previous videos
-              const adjustedTimestamp = currentOutputTime + originalTimestamp;
-              sample.setTimestamp(adjustedTimestamp);
+              // On first sample, record the minimum timestamp to normalize from
+              if (segmentMinTimestamp === null) {
+                segmentMinTimestamp = originalTimestamp;
+              }
 
+              // Normalize timestamp relative to segment start, then offset by base time
+              const normalizedTimestamp = originalTimestamp - segmentMinTimestamp;
+              const adjustedTimestamp = segmentBaseTime + normalizedTimestamp;
+
+              // Ensure strict monotonicity - timestamp must be >= highest written
+              const safeTimestamp = Math.max(adjustedTimestamp, highestWrittenTimestamp);
+
+              sample.setTimestamp(safeTimestamp);
               await videoSource.add(sample);
-              sample.close();
 
+              // Update highest written timestamp (timestamp + duration of this sample)
+              highestWrittenTimestamp = Math.max(
+                highestWrittenTimestamp,
+                safeTimestamp + originalDuration
+              );
+
+              sample.close();
               samplesFromThisVideo++;
 
               // Update progress
@@ -323,9 +371,6 @@ export const useStitchVideos = (): UseStitchVideosReturn => {
                 );
               }
             }
-
-            // Update the current output time for next video
-            currentOutputTime += videoDuration;
           } catch (videoError) {
             const errorMsg =
               videoError instanceof Error
