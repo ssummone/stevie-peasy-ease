@@ -22,6 +22,7 @@ import {
 } from '@/lib/types';
 import {
   runPreflightChecks,
+  formatResolutionLabel,
 } from '@/lib/project-service';
 import {
   getPresetBezier,
