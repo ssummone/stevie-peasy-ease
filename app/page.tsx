@@ -915,7 +915,7 @@ export default function Home() {
             <BlurFade>
               <div className="flex flex-col items-center gap-3 text-center">
                 <TextPressure
-                  text="EasyPeasyEase"
+                  text="Stevie-Easy-Peasy"
                   fontFamily="var(--font-inter-variable)"
                   weight={true}
                   width={false}
