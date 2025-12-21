@@ -27,6 +27,7 @@ import {
   getPresetBezier,
   DEFAULT_EASING,
   EASING_PRESETS,
+  DEFAULT_CUSTOM_BEZIER,
 } from '@/lib/easing-presets';
 
 type AudioFinalizeOptions = {
