@@ -436,7 +436,7 @@ export function VideoTimeline({
           className="timeline-scrollbar w-full max-w-full min-w-0 overflow-x-auto rounded-lg border border-border bg-secondary/30"
           onWheel={handleTimelineWheel}
         >
-          <div className="relative space-y-1 md:space-y-4" style={{ width: `${trackWidth} px` }}>
+          <div className="relative space-y-1 md:space-y-4" style={{ width: `${trackWidth}px` }}>
             {/* Time Ruler */}
             <div className="relative h-5 md:h-8 border-b border-border/60 bg-background/40">
               {Array.from({ length: tickCount }, (_, index) => {
@@ -445,7 +445,7 @@ export function VideoTimeline({
                   <div
                     key={index}
                     className="absolute flex -translate-x-1/2 flex-col items-center text-[10px] font-medium text-muted-foreground tabular-nums"
-                    style={{ left: `${tickPosition} px` }}
+                    style={{ left: `${tickPosition}px` }}
                   >
                     <div className="h-1 md:h-2 w-px bg-border" />
                     <span>{index}s</span>
@@ -538,7 +538,7 @@ export function VideoTimeline({
 
               <div
                 className="pointer-events-none absolute top-0 bottom-0 z-10 w-0.5 bg-primary"
-                style={{ left: `${playheadPosition} px` }}
+                style={{ left: `${playheadPosition}px` }}
               >
                 <div
                   className="pointer-events-auto absolute top-0 left-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-background bg-primary shadow-lg cursor-grab active:cursor-grabbing touch-none"
