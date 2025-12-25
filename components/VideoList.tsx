@@ -27,6 +27,7 @@ interface VideoListProps {
     encodeWarnings: string[];
     encodeErrors: string[];
     hasPendingEncodeChecks: boolean;
+    onFilesDropped: (files: FileList) => void;
     finalizationProgress: number;
     finalizationMessage: string;
 }
@@ -46,11 +47,13 @@ export function VideoList({
     encodeWarnings,
     encodeErrors,
     hasPendingEncodeChecks,
+    onFilesDropped,
     finalizationProgress,
     finalizationMessage,
 }: VideoListProps) {
     const [draggingVideoIndex, setDraggingVideoIndex] = useState<number | null>(null);
     const [dropIndicatorIndex, setDropIndicatorIndex] = useState<number | null>(null);
+    const [isFileDragOver, setIsFileDragOver] = useState(false);
 
     const handleVideoDragStart = (index: number) => (event: React.DragEvent<HTMLButtonElement>) => {
         setDraggingVideoIndex(index);
@@ -59,8 +62,15 @@ export function VideoList({
     };
 
     const handleVideoDragOver = (index: number) => (event: React.DragEvent<HTMLDivElement>) => {
+        // If it's a file drag, let the container handle it (propagate up) if we aren't reordering
+        if (draggingVideoIndex === null) {
+            return;
+        }
+
         event.preventDefault();
-        if (draggingVideoIndex === null || draggingVideoIndex === index) {
+        event.stopPropagation(); // Stop propagation only if we are handling reordering
+
+        if (draggingVideoIndex === index) {
             setDropIndicatorIndex(null);
             return;
         }
@@ -69,7 +79,11 @@ export function VideoList({
     };
 
     const handleVideoDrop = (index: number) => (event: React.DragEvent<HTMLDivElement>) => {
+        if (draggingVideoIndex === null) return; // Files handled by container
+
         event.preventDefault();
+        event.stopPropagation();
+
         const sourceIndex =
             draggingVideoIndex ?? Number.parseInt(event.dataTransfer.getData('text/plain'), 10);
 
@@ -89,9 +103,57 @@ export function VideoList({
         setDropIndicatorIndex(null);
     };
 
+    // Container handlers for file drop
+    const handleContainerDragOver = (e: React.DragEvent) => {
+        if (draggingVideoIndex !== null) return; // Ignore if reordering internally
+
+        if (e.dataTransfer.types.includes('Files')) {
+            e.preventDefault();
+            setIsFileDragOver(true);
+        }
+    };
+
+    const handleContainerDragLeave = (e: React.DragEvent) => {
+        // Avoid flickering when entering children
+        if (e.currentTarget.contains(e.relatedTarget as Node)) {
+            return;
+        }
+        setIsFileDragOver(false);
+    };
+
+    const handleContainerDrop = (e: React.DragEvent) => {
+        if (draggingVideoIndex !== null) return;
+
+        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            e.preventDefault();
+            setIsFileDragOver(false);
+            onFilesDropped(e.dataTransfer.files);
+        }
+    };
+
     return (
         <BlurFade delay={0.2} className="w-full">
-            <div className="w-full space-y-6">
+            <div
+                className="w-full space-y-6 relative"
+                onDragOver={handleContainerDragOver}
+                onDragLeave={handleContainerDragLeave}
+                onDrop={handleContainerDrop}
+            >
+                {/* Drag Overlay */}
+                {isFileDragOver && (
+                    <div className="absolute inset-0 z-50 flex items-center justify-center rounded-xl border-2 border-dashed border-primary bg-background/90 backdrop-blur-sm transition-all animate-in fade-in-0 duration-200">
+                        <div className="flex flex-col items-center gap-4 text-center p-8">
+                            <div className="rounded-full bg-primary/10 p-4">
+                                <Plus className="h-8 w-8 text-primary" />
+                            </div>
+                            <div>
+                                <h3 className="text-lg font-semibold">Drop videos here</h3>
+                                <p className="text-sm text-muted-foreground">to add them to your list</p>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
                 <div className="flex items-center justify-between">
                     <h3 className="text-lg font-semibold">
                         Uploaded Videos ({uploadedVideosCount})
@@ -128,8 +190,11 @@ export function VideoList({
 
                 {/* Videos List with Reordering */}
                 <div className="space-y-3">
+                    {/* Empty state for list if count is 0, though parent handles that */}
+
                     {transitionVideos.map((video, index) => {
                         const isDragging = draggingVideoIndex === index;
+                        // ... (rest of status logic)
                         const statusText = video.loading
                             ? 'Generating...'
                             : video.error
@@ -264,7 +329,7 @@ export function VideoList({
                         )}
                         {encodeWarnings.length > 0 && (
                             <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-800 dark:text-amber-200">
-                                <p className="font-semibold">This device can't encode:</p>
+                                <p className="font-semibold">This device can&apos;t encode:</p>
                                 <ul className="mt-2 list-disc space-y-1 pl-5">
                                     {encodeWarnings.map((warning) => (
                                         <li key={warning}>{warning}</li>

@@ -602,6 +602,7 @@ export default function Home() {
                 isFinalizing={isFinalizingVideo}
                 finalVideo={finalVideo}
                 onAddVideos={handleAddMoreVideos}
+                onFilesDropped={(files) => void addVideos(files, true)}
                 onReset={() => resetProject()}
                 onRemoveVideo={removeVideo}
                 onPlayVideo={handlePlayTransitionVideo}
